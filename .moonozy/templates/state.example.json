@@ -1,0 +1,46 @@
+{
+  "_comment": "SEED for Moonozy's per-user working state. .moonozy/state.json itself is gitignored (per-developer); on first run the orchestrator/SessionStart hook copies this file to .moonozy/state.json if it is missing. Shared, durable facts also live in committed CLAUDE.md and the glossary. Edit this seed (and CLAUDE.md) for changes the whole team should inherit on a fresh clone.",
+  "project": "<your project name>",
+  "documentLanguage": "en",
+  "phase": "init",
+  "glossary": "docs/CONTEXT.md",
+  "stack": {
+    "_comment": "Filled by Moonozy on first run by detecting manifest/build files. Record languages, frameworks, the build/test/lint commands the project ALREADY uses, the architecture style, and module layout. Moonozy adapts to this — it never imposes a new toolchain.",
+    "languages": [],
+    "build": "",
+    "test": "",
+    "lint": "",
+    "architecture": "",
+    "modules": [],
+    "notes": ""
+  },
+  "evaluation": { "threshold": 85, "lastScore": null, "history": [] },
+  "artifacts": { "businessCases": [], "prds": [], "adrs": [], "specs": [], "domain": [] },
+  "prototypes": [],
+  "tracker": {
+    "_comment": "mode 'local' (default): track work items in the PRD checklist + openDebt, no external tracker. mode 'required': every change needs a ticket in the system below BEFORE implementation/commit. system: jira | linear | github | none. project: the project key/repo. Set this once you wire up a tracker MCP.",
+    "mode": "local",
+    "system": "none",
+    "project": ""
+  },
+  "ubiquitousLanguage": [],
+  "ubiquitousLanguageSource": "The glossary path in `glossary` is the SINGLE canonical glossary. No second glossary; the domain-model skill writes terms into it. docs/architecture/domain/ holds only non-glossary structural docs (context-map.md, aggregates.md).",
+  "openDebt": [],
+  "gates": {
+    "_comment": "How quality is enforced in THIS repo. Moonozy ships Claude-side guardrail hooks (path protection, dangerous-git block, trunk-protection, PoC graduation gate, format-on-edit) that activate only once .moonozy/state.json exists. Record any project-side gate here too (e.g. a git pre-commit hook, lint-staged).",
+    "claudeGuardrails": "active (PreToolUse/PostToolUse hooks from the moonozy plugin)",
+    "projectPreCommit": "describe the repo's own pre-commit/CI fast checks here, if any"
+  },
+  "ci": {
+    "_comment": "The project's real pipeline — the Council scores the DORA axis against THIS, not the commit gate alone.",
+    "location": "",
+    "onPush": "",
+    "codeQuality": "",
+    "cd": ""
+  },
+  "agentTeams": {
+    "enabled": false,
+    "enableWith": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1",
+    "note": "Tier 2 (collaborative). Default is Tier 0/1 (inline / delegated subagents)."
+  }
+}

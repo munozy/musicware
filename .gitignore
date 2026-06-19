@@ -1,0 +1,5 @@
+
+# Moonozy — per-user working state (shared config under .moonozy/ stays committed)
+.moonozy/state.json
+.moonozy/journal.md
+.moonozy/evaluations/
