@@ -1,7 +1,9 @@
 # POC-001 — Spike 1: Python audio latency baseline
 
+> ⚠️ **SUPERSEDED by [ADR-0001](../../architecture/decisions/ADR-0001-react-tauri-rust-audio-engine.md)** (2026-06-19). The project chose a **Rust** audio engine over Python, so the Python-in-audio-path risk this spike was built to measure no longer applies. The spike code was removed; this brief is kept as a record of why Python was not pursued.
+
 > Owner: developer (solo). Norman/Nielsen/Torres: prototype to **learn**, throwaway by design.
-> Lives in `prototypes/spike-1-audio-latency/` — never production source. Graduating requires a linked PRD *and* ADR.
+> Lived in `prototypes/spike-1-audio-latency/` — never production source.
 
 ## Question / risk being tested
 **Feasibility** (the dominant risk in [BC-001](../business-cases/BC-001-musicware-learning-daw.md)): can a Python back-end sustain glitch-free, low-latency audio on macOS — i.e. can it return audio buffers fast enough to avoid underruns, at a latency low enough to be usable?
@@ -26,12 +28,10 @@ _Pending — fill `prototypes/spike-1-audio-latency/results.md` after running (M
 ## Decision
 - [ ] **Graduate** (→ needs PRD + ADR; hand off to architect/engineer)
 - [ ] **Iterate** (another PoC round)
-- [ ] **Drop** (and why)
-
-_Gate the decision on results: glitch-free at 512 + latency in the low tens of ms → proceed to Spike 2 (IPC). Underflows at 512 or latency ≫ 20 ms → Python-in-the-audio-path is the bottleneck; record the C/Rust engine fallback for ADR-001._
+- [x] **Drop** — superseded by ADR-0001. Rather than measure Python's audio limits, the project adopted a Rust engine (no GIL/GC in the audio path), which the C/Rust fallback in this spike's own gate anticipated.
 
 ## Status (mirror in state.prototypes)
-`exploring` — linkedPRD: pending · linkedADR: ADR-001 (pending)
+`superseded` — linkedADR: ADR-0001
 
 ## Links
-PRD: pending · ADR: ADR-001 (packaging/IPC, pending) · Discovery: BC-001 (Spike 1)
+PRD: pending · ADR: ADR-0001 (accepted — Rust engine chosen) · Discovery: BC-001 (Spike 1)

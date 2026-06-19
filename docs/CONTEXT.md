@@ -18,7 +18,7 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 
 ## Audio engine & runtime terms
 
-- **Audio graph** — The in-memory structure describing how tracks/clips route and sum into the output. The Python back-end owns it.
+- **Audio graph** — The in-memory structure describing how tracks/clips route and sum into the output. The Rust audio engine owns it (ADR-0001).
 - **Signal path** — The end-to-end route a sample travels: microphone capture → audio graph → file/output. The developer must be able to explain it end-to-end (an MVP acceptance criterion).
 - **Buffer** — A block of audio samples processed per callback (e.g. 512 samples ≈ 11 ms at 44.1 kHz). **Buffer size** trades latency against stability.
 - **Underrun** — The audio callback fails to deliver a buffer in time, causing an audible glitch/dropout. The primary symptom of the Python GIL/GC feasibility risk.
@@ -27,5 +27,10 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 
 ## Architecture terms
 
-- **Sidecar** — The Python back-end process running alongside the React UI inside the packaged macOS app; owns audio capture, the audio graph, and export.
-- **IPC round-trip** — A UI event travelling React → Python sidecar → response. Its latency under audio load is the subject of Spike 2 (target: median < 50 ms).
+> Per [ADR-0001](architecture/decisions/ADR-0001-react-tauri-rust-audio-engine.md): React+TS UI in **Tauri (v2)**, **Rust** audio engine. No Python.
+
+- **Tauri command** — The control-rate IPC call from the React UI to the Rust core (with **Tauri events** for Rust→UI notifications: playhead, meter levels at ~30–60 Hz). Replaces the former cross-process React↔Python IPC.
+- **Real-time thread** — The dedicated thread running the audio callback (via `cpal`). It must never block, lock, or allocate — doing so causes an underrun.
+- **Ring buffer** — The lock-free single-producer/single-consumer queue carrying data between the UI-facing Rust layer and the real-time thread, so the audio callback never waits.
+- **IPC round-trip** — A control-rate message travelling React → Rust (via a Tauri command) → response. **Audio samples never cross this boundary** (ADR-0001).
+- **Sidecar** — An out-of-process helper bundled with the app. **Not used in the core architecture** (audio runs in-process in Rust); reserved only as a possible future home for non-real-time extensions (e.g. Python scripting/ML).
