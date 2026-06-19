@@ -9,3 +9,19 @@ __pycache__/
 *.pyc
 .venv/
 prototypes/**/.venv/
+
+# Node / Vite (UI)
+node_modules
+dist
+dist-ssr
+*.local
+logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?
