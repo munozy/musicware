@@ -3,3 +3,9 @@
 .moonozy/state.json
 .moonozy/journal.md
 .moonozy/evaluations/
+
+# Python (spikes)
+__pycache__/
+*.pyc
+.venv/
+prototypes/**/.venv/

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spike 0 — musicware MVP UI sketch (throwaway)</title>
+<style>
+  /* THROWAWAY low-fidelity wireframe. Greyscale + dashed = "this is a sketch, not a design". */
+  :root{
+    --ink:#2b2b2b; --line:#9a9a9a; --muted:#6f6f6f; --paper:#f4f3f0;
+    --lane:#eceae6; --lane2:#e4e2dd; --clip:#cdcbc4; --loop:rgba(70,120,200,.18); --accent:#456;
+  }
+  *{box-sizing:border-box;font-family:ui-sans-serif,-apple-system,"SF Pro Text",Helvetica,Arial,sans-serif}
+  body{margin:0;background:var(--paper);color:var(--ink)}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+  .stamp{font-size:12px;color:var(--muted);border:1px dashed var(--line);border-radius:6px;
+         padding:6px 10px;display:inline-block;margin-bottom:12px}
+  h1{font-size:16px;margin:0 0 2px}
+  .sub{font-size:12px;color:var(--muted);margin:0 0 14px}
+
+  /* transport */
+  .transport{display:flex;align-items:center;gap:12px;border:1.5px dashed var(--line);
+             border-radius:8px;padding:10px 14px;background:#fff}
+  .btn{width:38px;height:38px;border:1.5px solid var(--ink);border-radius:8px;background:#fff;
+       display:grid;place-items:center;font-size:14px;cursor:default}
+  .btn.rec{color:#b23}
+  .time{font-variant-numeric:tabular-nums;font-size:20px;border:1px dashed var(--line);
+        padding:4px 10px;border-radius:6px;background:var(--paper)}
+  .pill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:4px 10px;color:var(--muted)}
+  .pill.on{border-color:var(--accent);color:var(--accent);background:#eef2f7}
+  .spacer{flex:1}
+
+  /* timeline */
+  .editor{display:grid;grid-template-columns:150px 1fr;border:1.5px dashed var(--line);
+          border-top:none;border-radius:0 0 8px 8px;overflow:hidden;background:#fff;margin-top:-1px}
+  .ruler-head,.lane-head{border-right:1px dashed var(--line)}
+  .ruler{grid-column:2;display:grid;grid-template-columns:repeat(8,1fr);
+         border-bottom:1px solid var(--line);position:relative}
+  .ruler .bar{border-right:1px dashed var(--line);font-size:11px;color:var(--muted);padding:4px 6px}
+  .ruler-head{grid-column:1;font-size:11px;color:var(--muted);padding:4px 8px;border-bottom:1px solid var(--line)}
+
+  .lane-head{padding:8px;border-bottom:1px dashed var(--line);background:var(--paper)}
+  .tname{font-size:13px;font-weight:600;margin-bottom:6px}
+  .ctrls{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .chip{font-size:10px;border:1px solid var(--line);border-radius:5px;padding:2px 5px;color:var(--muted)}
+  .chip.arm{color:#b23;border-color:#b23}
+  .knob{width:22px;height:22px;border:1.5px solid var(--ink);border-radius:50%;position:relative}
+  .knob::after{content:"";position:absolute;left:50%;top:3px;width:1.5px;height:8px;background:var(--ink);
+               transform-origin:bottom;transform:translateX(-50%) rotate(35deg)}
+  .fader{flex:1;min-width:54px;height:6px;border:1px solid var(--line);border-radius:3px;background:var(--paper);position:relative}
+  .fader::after{content:"";position:absolute;left:62%;top:-4px;width:10px;height:14px;border:1.5px solid var(--ink);
+                background:#fff;border-radius:3px}
+
+  .lane{grid-column:2;height:64px;border-bottom:1px dashed var(--line);position:relative;
+        background:repeating-linear-gradient(90deg,var(--lane),var(--lane) calc(12.5% - 1px),var(--line) 12.5%)}
+  .lane.alt{background:repeating-linear-gradient(90deg,var(--lane2),var(--lane2) calc(12.5% - 1px),var(--line) 12.5%)}
+  .clip{position:absolute;top:8px;bottom:8px;border:1.5px solid var(--ink);border-radius:6px;
+        background:var(--clip);display:flex;align-items:center;padding:0 8px;font-size:11px;color:var(--ink)}
+  .wave{position:absolute;left:6px;right:6px;top:50%;height:18px;transform:translateY(-50%);opacity:.5;
+        background:repeating-linear-gradient(90deg,transparent 0 2px,var(--ink) 2px 3px)}
+  /* loop region spanning bars 1-4 across all lanes */
+  .loop{position:absolute;top:0;bottom:0;left:0;width:50%;background:var(--loop);
+        border-left:2px solid var(--accent);border-right:2px solid var(--accent);pointer-events:none}
+  .loop-tag{position:absolute;top:2px;left:6px;font-size:10px;color:var(--accent)}
+  .playhead{position:absolute;top:0;bottom:0;left:18%;width:2px;background:#b23}
+
+  footer{display:flex;align-items:center;gap:12px;border:1.5px dashed var(--line);border-radius:8px;
+         padding:10px 14px;background:#fff;margin-top:12px}
+  .export{margin-left:auto;border:1.5px solid var(--ink);background:#fff;border-radius:8px;padding:8px 14px;font-size:13px}
+  .legend{font-size:11px;color:var(--muted);margin-top:14px;line-height:1.6}
+  .legend code{background:#fff;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="stamp">✎ THROWAWAY SKETCH · Spike 0 · maps to BC-001 MVP scope — not a design spec</span>
+  <h1>musicware — MVP surface</h1>
+  <p class="sub">Record · layer 4 tracks · loop a region · gain/pan · export a mixdown. Everything else is out of scope until the MVP acceptance test passes.</p>
+
+  <!-- TRANSPORT -->
+  <div class="transport">
+    <div class="btn rec" title="Record">●</div>
+    <div class="btn" title="Play">▶</div>
+    <div class="btn" title="Stop">■</div>
+    <div class="time">001 . 2 . 000</div>
+    <span class="pill on" title="Loop region active">↻ Loop 1–4</span>
+    <span class="pill">120 BPM</span>
+    <div class="spacer"></div>
+    <span class="pill">44.1 kHz · 512</span>
+  </div>
+
+  <!-- TIMELINE / TRACK EDITOR -->
+  <div class="editor">
+    <div class="ruler-head">bars</div>
+    <div class="ruler">
+      <div class="bar">1</div><div class="bar">2</div><div class="bar">3</div><div class="bar">4</div>
+      <div class="bar">5</div><div class="bar">6</div><div class="bar">7</div><div class="bar">8</div>
+    </div>
+
+    <!-- Track 1 (has a clip) -->
+    <div class="lane-head">
+      <div class="tname">Track 1</div>
+      <div class="ctrls">
+        <span class="chip arm">ARM</span><span class="chip">M</span><span class="chip">S</span>
+        <span class="knob" title="Pan"></span><span class="fader" title="Gain"></span>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="loop"><span class="loop-tag">loop region</span></div>
+      <div class="clip" style="left:0;width:37.5%"><div class="wave"></div><span>vocal take 1</span></div>
+      <div class="playhead"></div>
+    </div>
+
+    <!-- Track 2 -->
+    <div class="lane-head">
+      <div class="tname">Track 2</div>
+      <div class="ctrls">
+        <span class="chip">ARM</span><span class="chip">M</span><span class="chip">S</span>
+        <span class="knob"></span><span class="fader"></span>
+      </div>
+    </div>
+    <div class="lane alt"><div class="loop"></div>
+      <div class="clip" style="left:12.5%;width:25%"><div class="wave"></div><span>guitar</span></div>
+      <div class="playhead"></div>
+    </div>
+
+    <!-- Track 3 -->
+    <div class="lane-head">
+      <div class="tname">Track 3</div>
+      <div class="ctrls">
+        <span class="chip">ARM</span><span class="chip">M</span><span class="chip">S</span>
+        <span class="knob"></span><span class="fader"></span>
+      </div>
+    </div>
+    <div class="lane"><div class="loop"></div><div class="playhead"></div></div>
+
+    <!-- Track 4 -->
+    <div class="lane-head">
+      <div class="tname">Track 4</div>
+      <div class="ctrls">
+        <span class="chip">ARM</span><span class="chip">M</span><span class="chip">S</span>
+        <span class="knob"></span><span class="fader"></span>
+      </div>
+    </div>
+    <div class="lane alt"><div class="loop"></div><div class="playhead"></div></div>
+  </div>
+
+  <!-- MASTER / EXPORT -->
+  <footer>
+    <div class="tname" style="margin:0">Master</div>
+    <span class="knob" title="Pan"></span>
+    <span class="fader" style="max-width:140px"></span>
+    <button class="export">⭳ Export mixdown (WAV)</button>
+  </footer>
+
+  <p class="legend">
+    Glossary check (<code>docs/CONTEXT.md</code>): <code>transport</code> (top bar), <code>track</code> ×4 with
+    <code>gain</code>/<code>pan</code>, <code>clip</code> on a <code>track</code>, <code>region</code> + <code>loop</code>
+    highlighted over bars 1–4, <code>mixdown</code> via Export. ARM/M/S = record-arm / mute / solo.<br>
+    Purpose: confirm the MVP is even drawable at the locked scope before chasing latency numbers
+    (Norman/Nielsen — prototype to learn). React the sketch, then throw it away.
+  </p>
+</div>
+</body>
+</html>
