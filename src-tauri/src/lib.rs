@@ -40,6 +40,13 @@ fn note_off(engine: State<AudioEngine>, note: u8) -> Result<(), String> {
     engine.send_event(NoteEvent::NoteOff { note })
 }
 
+/// Select the timbre preset by index (0 = Sine, 1 = Organ, 2 = Piano).  Clamped,
+/// so any value is safe; takes effect within ~one audio block.
+#[tauri::command]
+fn set_preset(engine: State<AudioEngine>, index: u8) {
+    engine.set_preset(index);
+}
+
 // ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
@@ -53,7 +60,8 @@ pub fn run() {
             start_engine,
             stop_engine,
             note_on,
-            note_off
+            note_off,
+            set_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

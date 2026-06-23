@@ -49,8 +49,17 @@
 //! attack; a note-off starts the release; the voice goes silent (stage `Idle`)
 //! only when the release reaches zero.  The envelope ramps the amplitude in and
 //! out, so notes no longer click on note-on/note-off.  Each sample's output is
-//! `amp * envelope * sin(phase)`; the per-sample envelope step is bounded (no
-//! instantaneous jump), and a note from silence starts at envelope 0.
+//! `amp * envelope * eval_waveform(phase)`; the per-sample envelope step is
+//! bounded (no instantaneous jump), and a note from silence starts at envelope 0.
+//!
+//! Waveforms & presets (STORY-K4)
+//! ==============================
+//! `eval_waveform` provides selectable oscillator shapes (sine / saw / square /
+//! triangle / additive), each bounded to [-1, 1] so the headroom proof holds for
+//! any waveform.  A `Preset` bundles a waveform with an `AdsrSpec`; the selected
+//! preset (e.g. Sine / Organ / Piano) is an `AtomicU8` read once per block.  The
+//! waveform applies live to all voices; each voice captures its envelope preset at
+//! note-on (so an in-flight note keeps its envelope when the preset changes).
 //!
 //! Error callback note (CoreAudio)
 //! ================================
@@ -63,7 +72,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, StreamConfig};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -93,12 +102,132 @@ const EVENT_QUEUE_CAPACITY: usize = 256;
 
 const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
 
-// ADSR envelope (STORY-K2). Fixed constants for this slice — no UI control yet.
-// Times in seconds; per-sample increments are derived from the device sample rate.
-const ATTACK_SECS: f32 = 0.008; // ~8 ms — short enough to feel instant, long enough to de-click
-const DECAY_SECS: f32 = 0.060; // ~60 ms
-const SUSTAIN_LEVEL: f32 = 0.7; // sustain amplitude (0..1)
-const RELEASE_SECS: f32 = 0.120; // ~120 ms
+// ---------------------------------------------------------------------------
+// Waveforms (STORY-K4)
+// ---------------------------------------------------------------------------
+
+/// Oscillator shape.  `Copy` so it crosses the callback boundary by value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Waveform {
+    Sine,
+    Saw,
+    Square,
+    Triangle,
+    Additive,
+}
+
+/// Drawbar-style 1/k harmonic amplitudes for the additive (organ-ish) waveform.
+const ADDITIVE_AMPS: [f32; 8] = [
+    1.0,
+    1.0 / 2.0,
+    1.0 / 3.0,
+    1.0 / 4.0,
+    1.0 / 5.0,
+    1.0 / 6.0,
+    1.0 / 7.0,
+    1.0 / 8.0,
+];
+/// Σ of the partial amplitudes (rounded *up* past the f32 sum of `ADDITIVE_AMPS`).
+/// Dividing the raw sum by this maps the additive waveform into [-1, 1] *by
+/// construction* (|Σ aₖ·sin| ≤ Σ aₖ ≤ NORM), preserving the headroom proof
+/// regardless of how the amplitudes are later retuned. (True Σ 1/k for k=1..=8 ≈
+/// 2.7178571; rounded up so the bound is provably ≤ 1.0 even with f32 rounding.)
+const ADDITIVE_NORM: f32 = 2.717_858;
+
+/// Evaluate a waveform at `phase ∈ [0, 2π)`.  Pure function of phase; every
+/// branch returns strictly within [-1, 1] (the precondition the `MASTER_GAIN`
+/// headroom proof depends on).
+///
+/// DEBT: these are *naive* (not band-limited) oscillators — Saw and Square alias
+/// audibly on high notes (harmonics fold past Nyquist). Acceptable/instructive for
+/// a C3–C5 learning keyboard; band-limiting (PolyBLEP / wavetable) is a future story.
+fn eval_waveform(kind: Waveform, phase: f32) -> f32 {
+    let t = phase * (1.0 / TWO_PI); // normalized phase ∈ [0, 1)
+    match kind {
+        Waveform::Sine => phase.sin(),
+        Waveform::Saw => 2.0 * t - 1.0, // ramp -1 → +1, monotonic within a period
+        Waveform::Square => {
+            if t < 0.5 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        Waveform::Triangle => 1.0 - 4.0 * (t - 0.5).abs(), // -1 at t=0, +1 at t=0.5
+        Waveform::Additive => {
+            let mut sum = 0.0f32;
+            for k in 1..=ADDITIVE_AMPS.len() {
+                sum += ADDITIVE_AMPS[k - 1] * (k as f32 * phase).sin();
+            }
+            sum / ADDITIVE_NORM
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Presets (STORY-K4): a waveform + an envelope, selectable live
+// ---------------------------------------------------------------------------
+
+/// Sample-rate-independent ADSR spec (times in seconds).  Built into the
+/// per-sample `Adsr` via `Adsr::from_spec`.
+#[derive(Clone, Copy)]
+struct AdsrSpec {
+    attack_secs: f32,
+    decay_secs: f32,
+    sustain: f32,
+    release_secs: f32,
+}
+
+/// A timbre: an oscillator waveform plus its envelope shape. (Display names live
+/// in the UI; presets are referenced by index here.)
+#[derive(Clone, Copy)]
+struct Preset {
+    waveform: Waveform,
+    adsr: AdsrSpec,
+}
+
+pub const PRESET_COUNT: usize = 3;
+
+/// The selectable presets.  Index 0 (Sine) reproduces the pre-K4 sound exactly.
+static PRESETS: [Preset; PRESET_COUNT] = [
+    // 0: "Sine" — the pre-K4 default sound (behavior-preserving).
+    Preset {
+        waveform: Waveform::Sine,
+        adsr: AdsrSpec {
+            attack_secs: 0.008,
+            decay_secs: 0.060,
+            sustain: 0.7,
+            release_secs: 0.120,
+        },
+    },
+    // 1: "Organ" — rich additive + high sustain → a held, harmonically-warm drone.
+    Preset {
+        waveform: Waveform::Additive,
+        adsr: AdsrSpec {
+            attack_secs: 0.010,
+            decay_secs: 0.040,
+            sustain: 0.85,
+            release_secs: 0.150,
+        },
+    },
+    // 2: "Piano" — triangle + percussive ADSR (sustain 0, long decay) → plucks and
+    // fades while the key is held, unmistakably distinct from the organ.
+    Preset {
+        waveform: Waveform::Triangle,
+        adsr: AdsrSpec {
+            attack_secs: 0.003,
+            decay_secs: 0.600,
+            sustain: 0.0,
+            release_secs: 0.200,
+        },
+    },
+];
+
+/// Build the per-preset `Adsr` table for a given sample rate.  Allocation-free
+/// (fixed array); called once on the audio thread before the stream is built.
+fn build_adsr_table(sample_rate: f32) -> [Adsr; PRESET_COUNT] {
+    std::array::from_fn(|i| Adsr::from_spec(PRESETS[i].adsr, sample_rate))
+}
 
 /// Producer (control-thread) end of the note-event ring buffer.
 pub type NoteProducer = HeapProd<NoteEvent>;
@@ -145,8 +274,9 @@ struct Voice {
     phase_delta: f32,
     note: u8,
     stage: EnvStage,
-    env: f32, // current envelope amplitude, 0..1
-    age: u64, // allocation sequence number — larger = more recently triggered
+    env: f32,   // current envelope amplitude, 0..1
+    age: u64,   // allocation sequence number — larger = more recently triggered
+    preset: u8, // preset captured at note-on — selects this voice's envelope
 }
 
 impl Voice {
@@ -157,6 +287,7 @@ impl Voice {
         stage: EnvStage::Idle,
         env: 0.0,
         age: 0,
+        preset: 0,
     };
 
     /// Is this voice contributing sound (anything but fully released)?
@@ -233,12 +364,16 @@ struct Adsr {
 }
 
 impl Adsr {
-    fn new(sample_rate: f32) -> Self {
+    /// Build per-sample increments from a sample-rate-independent spec.
+    /// `release_inc` ramps from full scale (1.0) to 0 over `release_secs` — so it
+    /// reaches silence from *any* level, including a `sustain` of 0 (a release
+    /// rate of `sustain/release` would be 0 there and never free the voice).
+    fn from_spec(spec: AdsrSpec, sample_rate: f32) -> Self {
         Self {
-            attack_inc: 1.0 / (ATTACK_SECS * sample_rate).max(1.0),
-            decay_inc: (1.0 - SUSTAIN_LEVEL) / (DECAY_SECS * sample_rate).max(1.0),
-            release_inc: SUSTAIN_LEVEL / (RELEASE_SECS * sample_rate).max(1.0),
-            sustain: SUSTAIN_LEVEL,
+            attack_inc: 1.0 / (spec.attack_secs * sample_rate).max(1.0),
+            decay_inc: (1.0 - spec.sustain) / (spec.decay_secs * sample_rate).max(1.0),
+            release_inc: 1.0 / (spec.release_secs * sample_rate).max(1.0),
+            sustain: spec.sustain,
         }
     }
 }
@@ -282,7 +417,7 @@ fn step_env(voice: &mut Voice, adsr: &Adsr) -> f32 {
 /// Apply one note event to the pool.  Note-on allocates a voice (`alloc_index`)
 /// and (re)triggers its attack; note-off releases every sounding voice playing
 /// that note.
-fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32) {
+fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32, current_preset: u8) {
     match ev {
         NoteEvent::NoteOn { note } => {
             let i = alloc_index(&pool.voices, note);
@@ -293,6 +428,10 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32) {
             v.phase_delta = TWO_PI * note_to_freq(note) / sample_rate;
             v.stage = EnvStage::Attack;
             v.age = age;
+            // Capture the live preset so this voice keeps its envelope even if the
+            // preset is switched while it sounds (set on every alloc path: reuse,
+            // first-idle, and steal).
+            v.preset = current_preset;
             // Neither phase nor env is reset: both stay continuous so retriggering
             // (or stealing) a sounding voice has no amplitude jump — the attack
             // ramps from the current env up to 1.  From silence the env is already
@@ -312,14 +451,22 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32) {
 }
 
 /// Fill `out` with interleaved samples by summing every sounding voice, each
-/// shaped by its ADSR envelope (`amp * env * sin(phase)`), then scaling the sum
-/// by `MASTER_GAIN` for headroom.
+/// shaped by the live `waveform` and its own (per-voice) ADSR envelope, then
+/// scaling the sum by `MASTER_GAIN` for headroom.
 ///
 /// Stack-only: no allocations, no locks — safe to call from a real-time callback.
-/// Each voice contributes at most `amp`, and `MASTER_GAIN = 1/VOICE_COUNT`, so the
-/// written sample is within `[-amp, amp]` for any number of voices and any phases
-/// — the mix can never clip.
-fn render_block(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32, adsr: &Adsr) {
+/// `eval_waveform` is bounded to [-1, 1] and `env ∈ [0, 1]`, so each voice
+/// contributes at most `amp`; with `MASTER_GAIN = 1/VOICE_COUNT` the written
+/// sample stays within `[-amp, amp]` for any number of voices — the mix can never
+/// clip, for *any* waveform.
+fn render_block(
+    out: &mut [f32],
+    voices: &mut [Voice],
+    channels: usize,
+    amp: f32,
+    waveform: Waveform,
+    adsr_table: &[Adsr; PRESET_COUNT],
+) {
     // cpal always delivers whole interleaved frames, so `out.len()` is a multiple
     // of `channels`; the integer division below therefore drops nothing.
     let frame_count = out.len() / channels.max(1);
@@ -327,8 +474,8 @@ fn render_block(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32
         let mut sample = 0.0f32;
         for v in voices.iter_mut() {
             if v.is_sounding() {
-                let env = step_env(v, adsr);
-                sample += amp * env * v.phase.sin();
+                let env = step_env(v, &adsr_table[v.preset as usize]);
+                sample += amp * env * eval_waveform(waveform, v.phase);
                 v.phase += v.phase_delta;
                 // `while` (not `if`) so the wrap holds even if phase_delta ever
                 // exceeds 2π (absurdly high note numbers); normal notes loop once.
@@ -373,6 +520,9 @@ pub struct AudioEngine {
     /// hard-failing every other zero-voice cause (stream build/format/play
     /// failure on a device that *is* present).
     pub no_device: Arc<AtomicBool>,
+    /// Selected preset index (clamped to `0..PRESET_COUNT`), read once per block by
+    /// the audio thread.  Persists across engine restarts (not reset in start/stop).
+    preset: Arc<AtomicU8>,
     producer: Mutex<Option<NoteProducer>>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -391,9 +541,17 @@ impl AudioEngine {
             dropped_events: Arc::new(AtomicUsize::new(0)),
             sounding_voices: Arc::new(AtomicUsize::new(0)),
             no_device: Arc::new(AtomicBool::new(false)),
+            preset: Arc::new(AtomicU8::new(0)), // 0 = Sine (default)
             producer: Mutex::new(None),
             thread: Mutex::new(None),
         }
+    }
+
+    /// Select a preset (timbre) by index; clamped to a valid preset so any UI
+    /// value is safe. Takes effect within one audio block (~11 ms).
+    pub fn set_preset(&self, index: u8) {
+        let clamped = index.min(PRESET_COUNT as u8 - 1);
+        self.preset.store(clamped, Ordering::Relaxed);
     }
 
     /// Start the audio thread (silent until note events arrive).
@@ -420,9 +578,17 @@ impl AudioEngine {
         let underruns = Arc::clone(&self.underruns);
         let sounding_voices = Arc::clone(&self.sounding_voices);
         let no_device = Arc::clone(&self.no_device);
+        let preset = Arc::clone(&self.preset);
 
         let handle = thread::spawn(move || {
-            audio_thread(running, underruns, sounding_voices, no_device, consumer);
+            audio_thread(
+                running,
+                underruns,
+                sounding_voices,
+                no_device,
+                preset,
+                consumer,
+            );
         });
 
         *guard = Some(handle);
@@ -477,6 +643,7 @@ fn audio_thread(
     underruns: Arc<AtomicUsize>,
     sounding_voices: Arc<AtomicUsize>,
     no_device: Arc<AtomicBool>,
+    preset: Arc<AtomicU8>,
     mut consumer: NoteConsumer,
 ) {
     let host = cpal::default_host();
@@ -540,7 +707,9 @@ fn audio_thread(
     };
 
     let mut pool = VoicePool::new();
-    let adsr = Adsr::new(sr);
+    // Per-preset ADSR table, built once here (alloc allowed) from the real device
+    // sample rate; the callback only ever indexes it.
+    let adsr_table = build_adsr_table(sr);
 
     let stream = device.build_output_stream(
         &config,
@@ -548,11 +717,22 @@ fn audio_thread(
             // Wrap in assert_no_alloc so any accidental allocation aborts in
             // debug/test builds.  Compiles to a no-op in release.
             assert_no_alloc(|| {
+                // Read the live preset once per block (clamped) — waveform applies
+                // to all voices; the envelope is captured per-voice at note-on.
+                let i = (preset.load(Ordering::Relaxed) as usize).min(PRESET_COUNT - 1);
+                let waveform = PRESETS[i].waveform;
                 // Drain all pending note events (pure index math, no alloc/lock).
                 while let Some(ev) = consumer.try_pop() {
-                    apply_event(&mut pool, ev, sr);
+                    apply_event(&mut pool, ev, sr, i as u8);
                 }
-                render_block(data, &mut pool.voices, channels, AMPLITUDE, &adsr);
+                render_block(
+                    data,
+                    &mut pool.voices,
+                    channels,
+                    AMPLITUDE,
+                    waveform,
+                    &adsr_table,
+                );
                 // Publish how many voices are sounding so a test can confirm the
                 // callback actually ran under load (proves the device is live).
                 sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
@@ -604,6 +784,28 @@ mod tests {
     use ringbuf::traits::{Consumer, Producer, Split};
     use ringbuf::HeapRb;
 
+    // K4 changed the production signatures; these test-only shims keep the pre-K4
+    // tests terse. `Adsr::new` = the default (Sine) preset's envelope; `render_sine`
+    // renders the default waveform with a single-preset table (voices default to
+    // preset 0, so they step `adsr`).
+    impl Adsr {
+        fn new(sample_rate: f32) -> Self {
+            Adsr::from_spec(PRESETS[0].adsr, sample_rate)
+        }
+    }
+    fn render_sine(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32, adsr: &Adsr) {
+        let table = [*adsr; PRESET_COUNT];
+        render_block(out, voices, channels, amp, Waveform::Sine, &table);
+    }
+
+    const ALL_WAVEFORMS: [Waveform; 5] = [
+        Waveform::Sine,
+        Waveform::Saw,
+        Waveform::Square,
+        Waveform::Triangle,
+        Waveform::Additive,
+    ];
+
     /// Pitch math: f = 440 * 2^((n-69)/12), A4 = 69 = 440 Hz.
     #[test]
     fn note_to_freq_matches_equal_temperament() {
@@ -632,14 +834,14 @@ mod tests {
 
         // Fill every voice with a distinct note (60, 61, …) in order.
         for k in 0..VOICE_COUNT {
-            apply_event(&mut pool, NoteEvent::NoteOn { note: 60 + k as u8 }, sr);
+            apply_event(&mut pool, NoteEvent::NoteOn { note: 60 + k as u8 }, sr, 0);
         }
         assert_eq!(pool.sounding_count(), VOICE_COUNT, "pool should be full");
         assert_eq!(pool.voices[0].note, 60, "voices[0] was allocated first");
 
         // One more distinct note → must steal the oldest (voices[0]), not grow.
         let steal_note = 60 + VOICE_COUNT as u8;
-        apply_event(&mut pool, NoteEvent::NoteOn { note: steal_note }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: steal_note }, sr, 0);
         assert_eq!(pool.sounding_count(), VOICE_COUNT, "stole, didn't grow");
         assert_eq!(
             pool.voices[0].note, steal_note,
@@ -658,8 +860,8 @@ mod tests {
     fn same_note_retrigger_reuses_one_voice() {
         let mut pool = VoicePool::new();
         let sr = 44_100.0;
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 0);
         assert_eq!(pool.sounding_count(), 1, "same note must reuse one voice");
     }
 
@@ -669,11 +871,11 @@ mod tests {
     fn note_off_releases_matching_voice_and_no_match_is_noop() {
         let mut pool = VoicePool::new();
         let sr = 44_100.0;
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 64 }, sr);
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 67 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 64 }, sr, 0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 67 }, sr, 0);
 
-        apply_event(&mut pool, NoteEvent::NoteOff { note: 64 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 64 }, sr, 0);
         let v64 = pool.voices.iter().find(|v| v.note == 64).unwrap();
         assert_eq!(v64.stage, EnvStage::Release, "matching note should release");
         for n in [60u8, 67] {
@@ -693,7 +895,7 @@ mod tests {
                 .count()
         };
         let before = releasing(&pool);
-        apply_event(&mut pool, NoteEvent::NoteOff { note: 99 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 99 }, sr, 0);
         assert_eq!(
             before,
             releasing(&pool),
@@ -710,9 +912,9 @@ mod tests {
         let adsr = Adsr::new(44_100.0);
 
         let mut pool = VoicePool::new();
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0, 0);
         let mut buf = [0.0f32; FRAMES * CHANNELS];
-        render_block(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr);
+        render_sine(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr);
 
         assert!(pool.voices[0].phase > 0.0, "phase did not advance");
         let ceiling = AMPLITUDE * MASTER_GAIN + 1e-6;
@@ -730,7 +932,7 @@ mod tests {
         // Idle pool -> pure silence.
         let mut silent = VoicePool::new();
         let mut buf2 = [0.0f32; FRAMES * CHANNELS];
-        render_block(&mut buf2, &mut silent.voices, CHANNELS, AMPLITUDE, &adsr);
+        render_sine(&mut buf2, &mut silent.voices, CHANNELS, AMPLITUDE, &adsr);
         assert!(buf2.iter().all(|&s| s == 0.0), "idle pool produced sound");
     }
 
@@ -760,15 +962,25 @@ mod tests {
 
         let mut pool = VoicePool::new();
         let mut buf = [0.0f32; FRAMES * CHANNELS];
-        let adsr = Adsr::new(sr);
+        let adsr_table = build_adsr_table(sr);
         let sounding_voices = AtomicUsize::new(0);
 
-        // Mirror the real callback exactly: drain + render + publish the count.
+        // Mirror the real callback for EVERY waveform: drain + render + publish,
+        // all under the no-alloc guard (additive's harmonic loop included).
         assert_no_alloc(|| {
             while let Some(ev) = consumer.try_pop() {
-                apply_event(&mut pool, ev, sr);
+                apply_event(&mut pool, ev, sr, 1); // capture preset 1 (Organ)
             }
-            render_block(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr);
+            for wf in ALL_WAVEFORMS {
+                render_block(
+                    &mut buf,
+                    &mut pool.voices,
+                    CHANNELS,
+                    AMPLITUDE,
+                    wf,
+                    &adsr_table,
+                );
+            }
             sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
         });
 
@@ -899,9 +1111,9 @@ mod tests {
         let mut pool = VoicePool::new();
 
         // Onset: first rendered output sample from silence must be ~0.
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0, 0);
         let mut first = [0.0f32; 1];
-        render_block(&mut first, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        render_sine(&mut first, &mut pool.voices, CH, AMPLITUDE, &adsr);
         assert!(
             first[0].abs() < 1e-3,
             "onset click: first output {} not below -60 dBFS",
@@ -910,14 +1122,14 @@ mod tests {
 
         // Drive through attack/decay into sustain, then release and render to Idle.
         let mut warm = [0.0f32; 8192];
-        render_block(&mut warm, &mut pool.voices, CH, AMPLITUDE, &adsr);
-        apply_event(&mut pool, NoteEvent::NoteOff { note: 69 }, 44_100.0);
+        render_sine(&mut warm, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 69 }, 44_100.0, 0);
 
         let mut last_nonzero = 0.0f32;
         let mut reached_idle = false;
         for _ in 0..64 {
             let mut block = [0.0f32; 1024];
-            render_block(&mut block, &mut pool.voices, CH, AMPLITUDE, &adsr);
+            render_sine(&mut block, &mut pool.voices, CH, AMPLITUDE, &adsr);
             for &s in block.iter() {
                 if s != 0.0 {
                     last_nonzero = s;
@@ -946,9 +1158,9 @@ mod tests {
         let adsr = Adsr::new(44_100.0);
         let mut pool = VoicePool::new();
 
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0, 0);
         let mut buf = [0.0f32; 512];
-        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        render_sine(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
         let phase_before = pool.voices[0].phase;
         let env_before = pool.voices[0].env;
         assert!(
@@ -957,7 +1169,7 @@ mod tests {
         );
 
         // Same-note retrigger reuses the voice; phase/env must be continuous.
-        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0, 0);
         assert_eq!(
             pool.sounding_count(),
             1,
@@ -980,22 +1192,30 @@ mod tests {
 
     // --- STORY-K3: headroom -------------------------------------------------
 
-    /// Headroom by construction: with every voice at full envelope and maximally
-    /// in phase (worst-case constructive sum), the mix stays within [-1, 1] —
-    /// clipping is impossible — and the peak reaches ~AMPLITUDE (voices really sum).
+    /// Headroom by construction: with every voice at full envelope rendering the
+    /// LOUDEST waveform (Square = constant ±1, a strictly harder case than sine),
+    /// the mix stays within [-1, 1] — clipping is impossible — and the peak reaches
+    /// ~AMPLITUDE (the voices really sum). This is the true worst case after K4.
     #[test]
     fn headroom_full_pool_stays_in_bounds() {
         const CH: usize = 1;
-        let adsr = Adsr::new(44_100.0);
+        let table = build_adsr_table(44_100.0);
         let mut pool = VoicePool::new();
         for v in pool.voices.iter_mut() {
             v.stage = EnvStage::Decay; // returns env=1.0 on this sample (current-before-advance)
             v.env = 1.0;
-            v.phase = std::f32::consts::FRAC_PI_2; // sin = 1.0
+            v.phase = std::f32::consts::FRAC_PI_2; // t = 0.25 < 0.5 → Square = +1
             v.phase_delta = 0.0; // hold phase so every sample is the worst case
         }
         let mut buf = [0.0f32; 64];
-        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            CH,
+            AMPLITUDE,
+            Waveform::Square,
+            &table,
+        );
 
         for &s in buf.iter() {
             assert!(
@@ -1022,7 +1242,7 @@ mod tests {
         pool.voices[0].phase_delta = 0.0;
 
         let mut buf = [0.0f32; 16];
-        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        render_sine(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
         let peak = buf.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
         assert!(
             peak > 0.01,
@@ -1062,6 +1282,251 @@ mod tests {
         assert!(
             reached_idle && v.env == 0.0,
             "release from mid-attack did not reach silence"
+        );
+    }
+
+    // --- STORY-K4: waveforms / presets --------------------------------------
+
+    /// Every waveform stays within [-1, 1] across a dense phase sweep — the
+    /// precondition the `MASTER_GAIN` headroom proof relies on.
+    #[test]
+    fn all_waveforms_bounded() {
+        for wf in ALL_WAVEFORMS {
+            for i in 0..5000 {
+                let phase = (i as f32 / 5000.0) * TWO_PI;
+                let s = eval_waveform(wf, phase);
+                assert!(
+                    s.abs() <= 1.0 + 1e-6,
+                    "{wf:?} out of [-1,1] at {phase}: {s}"
+                );
+            }
+        }
+    }
+
+    /// Saw ramps monotonically upward within a period (the AC's wording).
+    #[test]
+    fn waveform_saw_is_monotonic_within_period() {
+        let n = 2000;
+        let mut prev = f32::NEG_INFINITY;
+        for i in 0..n {
+            let phase = (i as f32 / n as f32) * (TWO_PI - 1e-3);
+            let s = eval_waveform(Waveform::Saw, phase);
+            assert!(s >= prev, "saw not monotonic at phase {phase}");
+            prev = s;
+        }
+    }
+
+    /// Square is exactly two-valued (±1) and takes both values.
+    #[test]
+    fn waveform_square_is_two_valued() {
+        let (mut saw_pos, mut saw_neg) = (false, false);
+        for i in 0..2000 {
+            let phase = (i as f32 / 2000.0) * TWO_PI;
+            let s = eval_waveform(Waveform::Square, phase);
+            assert!(s == 1.0 || s == -1.0, "square value {s} not ±1");
+            if s > 0.0 {
+                saw_pos = true;
+            } else {
+                saw_neg = true;
+            }
+        }
+        assert!(saw_pos && saw_neg, "square should take both ±1 values");
+    }
+
+    /// Triangle is -1 at t=0, +1 at t=0.5.
+    #[test]
+    fn waveform_triangle_shape() {
+        assert!(
+            (eval_waveform(Waveform::Triangle, 0.0) + 1.0).abs() < 1e-5,
+            "triangle at t=0 should be -1"
+        );
+        assert!(
+            (eval_waveform(Waveform::Triangle, std::f32::consts::PI) - 1.0).abs() < 1e-5,
+            "triangle at t=0.5 should be +1"
+        );
+    }
+
+    /// The additive waveform stays bounded AND is not crushed (peak > 0.5),
+    /// proving the `/ADDITIVE_NORM` normalization keeps it audible.
+    #[test]
+    fn waveform_additive_is_bounded_and_audible() {
+        let mut peak = 0.0f32;
+        for i in 0..200_000 {
+            let phase = (i as f32 / 200_000.0) * TWO_PI;
+            let s = eval_waveform(Waveform::Additive, phase);
+            assert!((-1.0..=1.0).contains(&s), "additive {s} out of bounds");
+            peak = peak.max(s.abs());
+        }
+        assert!(
+            peak > 0.5,
+            "additive peak {peak} too low (over-normalized?)"
+        );
+    }
+
+    /// `eval_waveform` is a pure function of phase (no hidden state).
+    #[test]
+    fn eval_waveform_is_pure() {
+        for wf in ALL_WAVEFORMS {
+            let p = 1.234_f32;
+            assert_eq!(
+                eval_waveform(wf, p),
+                eval_waveform(wf, p),
+                "{wf:?} not pure"
+            );
+        }
+    }
+
+    /// `Adsr::from_spec` computes the expected per-sample increments, and
+    /// `release_inc` is > 0 even for the default — the refactor is sound.
+    #[test]
+    fn adsr_from_spec_computes_expected_increments() {
+        let sr = 44_100.0;
+        let a = Adsr::from_spec(PRESETS[0].adsr, sr); // Sine: 8/60/0.7/120 ms
+        assert!((a.attack_inc - 1.0 / (0.008 * sr)).abs() < 1e-9);
+        assert!((a.decay_inc - (1.0 - 0.7) / (0.060 * sr)).abs() < 1e-9);
+        assert!((a.release_inc - 1.0 / (0.120 * sr)).abs() < 1e-9);
+        assert_eq!(a.sustain, 0.7);
+    }
+
+    /// The organ and piano presets are structurally distinct (the basis of the
+    /// "audibly distinct" AC).
+    #[test]
+    fn presets_distinct_organ_vs_piano() {
+        assert_eq!(PRESETS[1].waveform, Waveform::Additive, "organ = additive");
+        assert!(PRESETS[1].adsr.sustain >= 0.8, "organ should sustain");
+        assert_eq!(PRESETS[2].waveform, Waveform::Triangle, "piano = triangle");
+        assert_eq!(PRESETS[2].adsr.sustain, 0.0, "piano should not sustain");
+        assert!(
+            PRESETS[2].adsr.decay_secs >= 0.3,
+            "piano should decay slowly"
+        );
+    }
+
+    /// The piano preset's release reaches exact silence/Idle despite sustain == 0
+    /// — guards the `release_inc = 1/release_secs` fix (a `sustain/release` rate
+    /// would be 0 here and strand the voice forever).
+    #[test]
+    fn piano_preset_release_reaches_silence_despite_zero_sustain() {
+        let piano = Adsr::from_spec(PRESETS[2].adsr, 44_100.0);
+        assert_eq!(piano.sustain, 0.0);
+        assert!(
+            piano.release_inc > 0.0,
+            "release_inc must be > 0 even at sustain 0"
+        );
+        let mut v = Voice::SILENT;
+        v.stage = EnvStage::Release;
+        v.env = 0.5; // released mid-decay
+        let mut reached_idle = false;
+        for _ in 0..1_000_000 {
+            step_env(&mut v, &piano);
+            if v.stage == EnvStage::Idle {
+                reached_idle = true;
+                break;
+            }
+        }
+        assert!(
+            reached_idle && v.env == 0.0,
+            "piano voice never reached silence"
+        );
+    }
+
+    /// `set_preset` clamps any index into a valid preset (no panic, no OOB).
+    #[test]
+    fn set_preset_clamps_out_of_range() {
+        let engine = AudioEngine::new();
+        engine.set_preset(250);
+        assert_eq!(
+            engine.preset.load(Ordering::Relaxed),
+            PRESET_COUNT as u8 - 1,
+            "out-of-range index should clamp to the last preset"
+        );
+        engine.set_preset(1);
+        assert_eq!(engine.preset.load(Ordering::Relaxed), 1);
+    }
+
+    /// Switching the waveform changes the rendered output (the audible-timbre AC),
+    /// while phase stays continuous.
+    #[test]
+    fn switching_waveform_changes_rendered_output() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mk = || {
+            let mut p = VoicePool::new();
+            apply_event(&mut p, NoteEvent::NoteOn { note: 69 }, sr, 0);
+            p
+        };
+        let (mut a, mut b) = (mk(), mk());
+        let mut sine = [0.0f32; 256];
+        let mut saw = [0.0f32; 256];
+        render_block(
+            &mut sine,
+            &mut a.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Sine,
+            &table,
+        );
+        render_block(&mut saw, &mut b.voices, 1, AMPLITUDE, Waveform::Saw, &table);
+        assert!(
+            sine.iter()
+                .zip(saw.iter())
+                .any(|(x, y)| (x - y).abs() > 1e-4),
+            "sine and saw should produce different output"
+        );
+    }
+
+    /// The envelope is captured per-voice at note-on: a note keeps its preset's
+    /// envelope even after a later note-on captures a different preset (and the
+    /// capture happens on every alloc path, including a steal).
+    #[test]
+    fn preset_envelope_is_captured_per_voice_at_note_on() {
+        let sr = 44_100.0;
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 2); // Piano
+        assert_eq!(pool.voices.iter().find(|v| v.note == 60).unwrap().preset, 2);
+
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 64 }, sr, 1); // Organ
+        assert_eq!(pool.voices.iter().find(|v| v.note == 64).unwrap().preset, 1);
+        // The first voice kept its captured (Piano) preset.
+        assert_eq!(pool.voices.iter().find(|v| v.note == 60).unwrap().preset, 2);
+    }
+
+    /// Render-level proof of the per-voice envelope split: two voices with
+    /// DIFFERENT captured presets, stepped in the SAME render_block call, follow
+    /// DIFFERENT envelopes — a Piano voice (sustain 0) decays to silence while an
+    /// Organ voice (sustain 0.85) holds. Kills a regression that steps every voice
+    /// with a single (e.g. `adsr_table[0]`) envelope — which the field-only test
+    /// above cannot catch.
+    #[test]
+    fn per_voice_envelope_renders_distinct_sustains() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 2); // Piano: sustain 0
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 64 }, sr, 1); // Organ: sustain 0.85
+
+        // Render ~1.5 s so both pass attack+decay into sustain (Piano decay = 600 ms).
+        let mut buf = [0.0f32; 4096];
+        for _ in 0..16 {
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Sine,
+                &table,
+            );
+        }
+
+        let piano_env = pool.voices.iter().find(|v| v.note == 60).unwrap().env;
+        let organ_env = pool.voices.iter().find(|v| v.note == 64).unwrap().env;
+        assert!(
+            piano_env < 0.05,
+            "piano voice (sustain 0) should decay to silence, env={piano_env}"
+        );
+        assert!(
+            organ_env > 0.7,
+            "organ voice should sustain near 0.85, env={organ_env}"
         );
     }
 }

@@ -189,6 +189,39 @@ button {
   margin-top: 1rem;
 }
 
+.presets {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin: 0.5rem auto 0;
+  width: max-content;
+}
+
+.preset {
+  border-radius: 0;
+  border: 1px solid #888;
+  border-right-width: 0;
+  padding: 0.4em 1.1em;
+  background: #fff;
+  color: #444;
+  box-shadow: none;
+}
+
+.preset:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.preset:last-child {
+  border-radius: 0 8px 8px 0;
+  border-right-width: 1px;
+}
+
+.preset.selected {
+  background: #396cd8;
+  color: #fff;
+  border-color: #396cd8;
+}
+
 .kbd-hint kbd {
   font-family: inherit;
   font-size: 0.72rem;

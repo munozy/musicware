@@ -67,7 +67,8 @@ describe("keyboard (STORY-K1)", () => {
 
   it("renders a 25-key, two-octave surface (15 white + 10 black) spanning C3–C5", () => {
     render(<App />);
-    expect(screen.getAllByRole("button")).toHaveLength(25);
+    // Count only keyboard keys (their labels contain "note N"), not the preset buttons.
+    expect(screen.getAllByRole("button", { name: /note \d/ })).toHaveLength(25);
     // Range endpoints exist: C3 (note 48) and C5 (note 72).
     expect(screen.getByRole("button", { name: /note 48/ })).toBeDefined();
     expect(screen.getByRole("button", { name: /note 72/ })).toBeDefined();

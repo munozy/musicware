@@ -35,6 +35,7 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Envelope (ADSR)** — The per-voice amplitude shape over time: Attack, Decay, Sustain, Release. Ramps a note in/out so it doesn't click on note-on/note-off.
 - **Note event** — A **note-on** (start a pitch) or **note-off** (release it), issued by the UI and delivered to the real-time thread via the ring buffer. Drives voice allocation.
 - **Note number / pitch** — A note is identified by an integer note number; its frequency is `f = 440·2^((n−69)/12)` (A4 = 69 = 440 Hz). This is pitch math, **not** MIDI I/O.
+- **Preset** — A named timbre = a waveform + an envelope, selectable live (e.g. Sine / Organ / Piano). The waveform applies to all voices; each voice captures its envelope preset at note-on (STORY-K4).
 
 ## Architecture terms
 
