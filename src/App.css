@@ -127,15 +127,17 @@ button {
 
 .keyboard {
   position: relative;
-  display: flex;
-  width: max-content;
+  /* width is set inline (= white-key count × key width) */
   height: 160px;
   margin: 2rem auto 0;
   user-select: none;
   touch-action: none;
 }
 
+/* Every key is absolutely positioned via an inline `left` offset. */
 .key {
+  position: absolute;
+  top: 0;
   padding: 0;
   display: flex;
   align-items: flex-end;
@@ -145,12 +147,13 @@ button {
 }
 
 .key.white {
-  width: 48px;
+  width: 36px;
   height: 160px;
   background: #ffffff;
   border: 1px solid #888;
   border-radius: 0 0 5px 5px;
   color: #444;
+  z-index: 1;
 }
 
 .key.white:active {
@@ -158,9 +161,7 @@ button {
 }
 
 .key.black {
-  position: absolute;
-  top: 0;
-  width: 30px;
+  width: 22px;
   height: 100px;
   background: #1a1a1a;
   border: 1px solid #000;
@@ -174,7 +175,7 @@ button {
 }
 
 .key .key-label {
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   padding-bottom: 6px;
   pointer-events: none;
 }

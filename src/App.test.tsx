@@ -65,8 +65,11 @@ describe("keyboard (STORY-K1)", () => {
     expect(offs[0][1]).toEqual({ note: 65 });
   });
 
-  it("renders a full octave: 7 white keys and 5 black keys", () => {
+  it("renders a 25-key, two-octave surface (15 white + 10 black) spanning C3–C5", () => {
     render(<App />);
-    expect(screen.getAllByRole("button")).toHaveLength(12);
+    expect(screen.getAllByRole("button")).toHaveLength(25);
+    // Range endpoints exist: C3 (note 48) and C5 (note 72).
+    expect(screen.getByRole("button", { name: /note 48/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /note 72/ })).toBeDefined();
   });
 });
