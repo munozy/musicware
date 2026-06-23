@@ -1,0 +1,59 @@
+name: CI
+
+# Runs the same green checks we run locally, on every push and PR.
+# macOS runner: matches the target platform (Tauri macOS app) and lets `cpal`
+# build against CoreAudio without the Linux ALSA dev dependency.
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: fmt · clippy · test · build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Rust toolchain + cache (engine in src-tauri/) ---
+      - name: Install Rust (stable) with rustfmt + clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # --- Node toolchain + cache (UI) ---
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # --- Rust checks (src-tauri/) ---
+      - name: rustfmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: src-tauri
+        # Unit + integration tests. The 60s glitch gate is #[ignore]d (audible,
+        # device-dependent) and does not run here.
+        run: cargo test
+
+      # --- UI checks ---
+      - name: Type-check + build (tsc + vite)
+        run: npm run build
+      - name: vitest
+        run: npm test
