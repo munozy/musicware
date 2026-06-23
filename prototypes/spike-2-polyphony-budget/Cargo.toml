@@ -1,0 +1,16 @@
+# THROWAWAY spike (DEBT-012 / PRD-002 KA1). Not production code, not part of the
+# src-tauri crate. Answers ONE question: does polyphonic mix + per-sample envelope
+# fit the 512-frame real-time budget? Standalone so it can't perturb the app build.
+[package]
+name = "spike-polyphony-budget"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+assert_no_alloc = "1.1"
+
+# Optimise even the default build a little so a quick `cargo run` isn't wildly
+# unrepresentative — but the RELEASE run is the authoritative timing measurement.
+[profile.dev]
+opt-level = 1

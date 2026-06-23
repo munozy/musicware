@@ -4,6 +4,10 @@
 .moonozy/journal.md
 .moonozy/evaluations/
 
+# Rust (spikes / any crate target dir not covered by a nested .gitignore)
+target/
+prototypes/**/target/
+
 # Python (spikes)
 __pycache__/
 *.pyc
@@ -23,5 +27,6 @@ npm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
+*.iml
 .DS_Store
 *.sw?

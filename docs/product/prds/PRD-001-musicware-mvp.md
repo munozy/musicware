@@ -156,6 +156,11 @@ Each slice is independently demoable. The first slice is the **feasibility gate*
 
 ### Out of scope (explicit non-goals)
 
+> **Note (2026-06-23):** [PRD-002](PRD-002-playable-keyboard-synth.md) deliberately opens a *parallel,
+> additive* track — a playable software **synthesizer** — that relaxes the implicit "no synthesis"
+> boundary below. Hardware **MIDI** and **effects beyond gain/pan** remain non-goals there too;
+> PRD-002 adds only software note-driven synthesis. This MVP's acceptance test is unchanged.
+
 - **MIDI** — no MIDI input, output, or clock
 - **VST / plugin support** — no plugin host or AU/VST2/VST3 loading
 - **Automation** — no parameter automation lanes

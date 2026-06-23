@@ -25,6 +25,17 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Latency** — Time from input/action to audible output. MVP target: round-trip under 20 ms; engine buffer stable at 512 samples.
 - **Sample rate** — Samples per second of audio (e.g. 44.1 kHz). Fixed for the MVP.
 
+## Synthesis terms
+
+> Added 2026-06-23 from [PRD-002](product/prds/PRD-002-playable-keyboard-synth.md) (playable keyboard synth). A *parallel, additive* track on top of the STORY-01 engine; no hardware MIDI.
+
+- **Oscillator** — The thing that generates a periodic waveform from a phase accumulator. **Waveform** — its shape: sine, saw, square, triangle, or an **additive** sum of harmonics.
+- **Voice** — One sounding note: an oscillator + its envelope + the note it's playing. The synth holds a fixed pool of voices.
+- **Polyphony** — How many voices can sound at once (a held chord). MVP target: ≥ 8. **Voice stealing** — when more notes are requested than voices exist, the oldest voice is reclaimed.
+- **Envelope (ADSR)** — The per-voice amplitude shape over time: Attack, Decay, Sustain, Release. Ramps a note in/out so it doesn't click on note-on/note-off.
+- **Note event** — A **note-on** (start a pitch) or **note-off** (release it), issued by the UI and delivered to the real-time thread via the ring buffer. Drives voice allocation.
+- **Note number / pitch** — A note is identified by an integer note number; its frequency is `f = 440·2^((n−69)/12)` (A4 = 69 = 440 Hz). This is pitch math, **not** MIDI I/O.
+
 ## Architecture terms
 
 > Per [ADR-0001](architecture/decisions/ADR-0001-react-tauri-rust-audio-engine.md): React+TS UI in **Tauri (v2)**, **Rust** audio engine. No Python.
