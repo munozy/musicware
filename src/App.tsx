@@ -6,7 +6,8 @@ function App() {
     <main className="container">
       <h1>musicware — keyboard</h1>
       <p className="hint">
-        Click a key to play a note. Monophonic for now — 25 keys, two octaves (C3–C5).
+        Play with the mouse or your computer keyboard — hold several keys for chords
+        (16-voice polyphony). 25 keys, two octaves (C3–C5).
       </p>
       <Keyboard />
     </main>

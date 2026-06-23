@@ -73,3 +73,60 @@ describe("keyboard (STORY-K1)", () => {
     expect(screen.getByRole("button", { name: /note 72/ })).toBeDefined();
   });
 });
+
+describe("computer keyboard (STORY-K5 mapping)", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockClear();
+  });
+
+  it("maps a physical key to its note on keydown and releases it on keyup", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "a" }); // A → C at the default octave (C4 = 60)
+    fireEvent.keyUp(window, { key: "a" });
+
+    const ons = callsFor("note_on");
+    const offs = callsFor("note_off");
+    expect(ons).toHaveLength(1);
+    expect(ons[0][1]).toEqual({ note: 60 });
+    expect(offs).toHaveLength(1);
+    expect(offs[0][1]).toEqual({ note: 60 });
+  });
+
+  it("suppresses OS auto-repeat (a held key fires one note_on)", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "a" });
+    fireEvent.keyDown(window, { key: "a", repeat: true }); // auto-repeat
+    fireEvent.keyDown(window, { key: "a", repeat: true });
+
+    expect(callsFor("note_on")).toHaveLength(1);
+  });
+
+  it("plays a held chord — multiple keys sound at once", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "a" }); // C4 = 60
+    fireEvent.keyDown(window, { key: "d" }); // E4 = 64
+    fireEvent.keyDown(window, { key: "g" }); // G4 = 67
+
+    const notes = callsFor("note_on").map(([, arg]) => (arg as { note: number }).note);
+    expect(notes).toEqual([60, 64, 67]);
+  });
+
+  it("octave shift (X) transposes subsequent notes up an octave", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "x" }); // octave up → base C5 (72)
+    fireEvent.keyDown(window, { key: "a" });
+
+    expect(callsFor("note_on")[0][1]).toEqual({ note: 72 });
+  });
+
+  it("releases the originally-pressed note even if the octave shifts while held", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "a" }); // note 60
+    fireEvent.keyDown(window, { key: "x" }); // octave up while 'a' is still held
+    fireEvent.keyUp(window, { key: "a" });
+
+    const offs = callsFor("note_off");
+    expect(offs).toHaveLength(1);
+    expect(offs[0][1]).toEqual({ note: 60 }); // not 72 — no stranded note
+  });
+});

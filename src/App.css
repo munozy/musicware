@@ -156,7 +156,8 @@ button {
   z-index: 1;
 }
 
-.key.white:active {
+.key.white:active,
+.key.white.held {
   background: #d6e4ff;
 }
 
@@ -170,7 +171,8 @@ button {
   z-index: 2;
 }
 
-.key.black:active {
+.key.black:active,
+.key.black.held {
   background: #3a3a3a;
 }
 
@@ -178,4 +180,20 @@ button {
   font-size: 0.62rem;
   padding-bottom: 6px;
   pointer-events: none;
+}
+
+.kbd-hint {
+  text-align: center;
+  color: #888;
+  font-size: 0.8rem;
+  margin-top: 1rem;
+}
+
+.kbd-hint kbd {
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 1px 5px;
+  border: 1px solid #999;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.12);
 }
