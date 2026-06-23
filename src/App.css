@@ -114,3 +114,67 @@ button {
     background-color: #0f0f0f69;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Keyboard (STORY-K1)                                                */
+/* ------------------------------------------------------------------ */
+
+.hint {
+  text-align: center;
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.keyboard {
+  position: relative;
+  display: flex;
+  width: max-content;
+  height: 160px;
+  margin: 2rem auto 0;
+  user-select: none;
+  touch-action: none;
+}
+
+.key {
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.25);
+}
+
+.key.white {
+  width: 48px;
+  height: 160px;
+  background: #ffffff;
+  border: 1px solid #888;
+  border-radius: 0 0 5px 5px;
+  color: #444;
+}
+
+.key.white:active {
+  background: #d6e4ff;
+}
+
+.key.black {
+  position: absolute;
+  top: 0;
+  width: 30px;
+  height: 100px;
+  background: #1a1a1a;
+  border: 1px solid #000;
+  border-radius: 0 0 4px 4px;
+  color: #ddd;
+  z-index: 2;
+}
+
+.key.black:active {
+  background: #3a3a3a;
+}
+
+.key .key-label {
+  font-size: 0.7rem;
+  padding-bottom: 6px;
+  pointer-events: none;
+}

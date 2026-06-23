@@ -1,7 +1,13 @@
-//! Glitch-free tone playback — 60-second feasibility gate (STORY-01).
+//! Glitch-free tone playback — 60-second feasibility gate (STORY-01, carried
+//! into STORY-K1).
+//!
+//! Since STORY-K1 the engine starts SILENT, so this gate sends a note-on (A4)
+//! before measuring — otherwise it would validate a silent stream and pass
+//! vacuously.  (STORY-K3 will extend this to hold the maximum voice count
+//! sounding, per PRD-002.)
 //!
 //! This test is marked `#[ignore]` so it does NOT run during normal `cargo test`
-//! (it would emit an audible tone and takes up to 60 seconds).
+//! (it emits an audible tone and takes up to 60 seconds).
 //!
 //! How to run on macOS/Apple Silicon:
 //!
@@ -18,7 +24,7 @@
 //! problems — including buffer underruns — through the error callback, so
 //! "0 error-callback invocations" is the practical proxy for "0 underruns."
 
-use musicware_lib::audio::AudioEngine;
+use musicware_lib::audio::{AudioEngine, NoteEvent};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -41,7 +47,12 @@ fn glitch_free_60s() {
         }
     }
 
-    println!("[glitch_gate] playing sine for {secs}s — listen for glitches …");
+    // Sound a note so the gate exercises the real render path, not silence.
+    engine
+        .send_event(NoteEvent::NoteOn { note: 69 })
+        .expect("failed to send note-on");
+
+    println!("[glitch_gate] sounding note 69 (A4 = 440 Hz) for {secs}s — listen for glitches …");
     std::thread::sleep(Duration::from_secs(secs));
 
     let underruns = engine.underruns.load(Ordering::SeqCst);

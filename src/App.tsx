@@ -1,33 +1,14 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import Keyboard from "./Keyboard";
 
 function App() {
-  const [playing, setPlaying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function toggleTone() {
-    setError(null);
-    try {
-      if (playing) {
-        await invoke("stop_tone");
-        setPlaying(false);
-      } else {
-        await invoke("start_tone");
-        setPlaying(true);
-      }
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
   return (
     <main className="container">
-      <h1>musicware — tone test</h1>
-      <button onClick={toggleTone}>
-        {playing ? "■ Stop tone" : "▶ Play tone"}
-      </button>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      <h1>musicware — keyboard</h1>
+      <p className="hint">
+        Click a key to play a note. STORY-K1: monophonic, one octave (C4–B4).
+      </p>
+      <Keyboard />
     </main>
   );
 }
