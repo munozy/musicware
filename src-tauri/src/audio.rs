@@ -33,11 +33,15 @@
 //! In debug/test builds the callback body is wrapped in `assert_no_alloc` — any
 //! accidental heap allocation panics immediately rather than silently glitching.
 //!
-//! Voice model
-//! ===========
-//! K1 is monophonic: a fixed `[Voice; VOICE_COUNT]` array with `VOICE_COUNT = 1`.
-//! K3 (polyphony) is literally bumping that constant plus a voice-allocation
-//! helper — the render loop already iterates the array.
+//! Voice model (STORY-K3: polyphony)
+//! =================================
+//! A fixed `VoicePool` of `[Voice; VOICE_COUNT]` voices (no heap).  A note-on is
+//! allocated to a voice by `alloc_index`: reuse a voice already playing that note,
+//! else the first idle voice, else **steal the oldest** (smallest `age`, a
+//! monotonic per-pool counter — deterministic).  A note-off releases every
+//! sounding voice playing that note.  The summed output is scaled by a fixed
+//! `MASTER_GAIN = 1/VOICE_COUNT` so any combination of voices stays within
+//! `[-AMPLITUDE, AMPLITUDE]` — clipping is impossible *by construction*.
 //!
 //! Envelope (STORY-K2)
 //! ===================
@@ -63,16 +67,25 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-/// Amplitude chosen low enough to avoid a harsh tone.
-const AMPLITUDE: f32 = 0.15;
+/// Per-voice peak amplitude.  Also the hard output ceiling: because the summed
+/// voices are scaled by `MASTER_GAIN = 1/VOICE_COUNT`, the mix peaks at exactly
+/// `AMPLITUDE` even with all voices at full envelope and in phase (see `render_block`).
+/// 0.8 keeps single notes audible while leaving headroom below full scale (1.0).
+const AMPLITUDE: f32 = 0.8;
 
 /// Preferred buffer size in frames (512 ≈ 11 ms at 44.1 kHz).
 const PREFERRED_BUFFER_FRAMES: u32 = 512;
 
-/// Number of simultaneous voices.  K1 = 1 (mono).  K3 polyphony bumps this AND
-/// teaches `apply_event` real voice allocation/stealing (today it hardcodes
-/// `voices[0]`, so bumping this constant alone would stay monophonic).
-const VOICE_COUNT: usize = 1;
+/// Number of simultaneous voices (polyphony).  POC-003 validated 16 at ~4% of
+/// the 512-frame budget.  Allocation/stealing/headroom are all written in terms
+/// of this constant, so it is a one-line change.
+pub const VOICE_COUNT: usize = 16;
+
+/// Headroom scale applied to the summed voices.  Each voice contributes at most
+/// `AMPLITUDE`, so `sum(N voices) * MASTER_GAIN <= AMPLITUDE < 1.0` for any N and
+/// any phases — the mix can never clip, and the scale is constant so there is no
+/// zipper/pumping as voices enter and leave.
+const MASTER_GAIN: f32 = 1.0 / VOICE_COUNT as f32;
 
 /// Capacity of the note-event queue.  Drained every ~11 ms block, so steady-state
 /// occupancy is ~0–2; 256 gives orders-of-magnitude headroom against a burst.
@@ -133,6 +146,7 @@ struct Voice {
     note: u8,
     stage: EnvStage,
     env: f32, // current envelope amplitude, 0..1
+    age: u64, // allocation sequence number — larger = more recently triggered
 }
 
 impl Voice {
@@ -142,12 +156,71 @@ impl Voice {
         note: 0,
         stage: EnvStage::Idle,
         env: 0.0,
+        age: 0,
     };
 
     /// Is this voice contributing sound (anything but fully released)?
     fn is_sounding(&self) -> bool {
         self.stage != EnvStage::Idle
     }
+}
+
+/// The fixed polyphony pool, owned on the audio thread.  `next_age` is a
+/// monotonic counter stamped onto each voice on note-on so "oldest" (smallest
+/// age) is a deterministic, alloc-free `min` scan.
+struct VoicePool {
+    voices: [Voice; VOICE_COUNT],
+    next_age: u64,
+}
+
+impl VoicePool {
+    fn new() -> Self {
+        Self {
+            voices: [Voice::SILENT; VOICE_COUNT],
+            next_age: 0,
+        }
+    }
+
+    /// Count of currently-sounding voices (used by the non-vacuous gate).
+    fn sounding_count(&self) -> usize {
+        self.voices.iter().filter(|v| v.is_sounding()).count()
+    }
+}
+
+/// Choose the voice index a note-on should claim, in priority order:
+///   1. a voice already sounding this exact `note` (same-note reuse → one voice
+///      per held key, preserving retrigger continuity);
+///   2. the first idle voice;
+///   3. otherwise **steal the oldest** sounding voice (smallest `age`; ties broken
+///      by lowest index).
+///
+/// Pure index math — no allocation, no lock.  Deterministic: the chosen index is
+/// a pure function of the pool state, so stealing is unit-testable exactly.
+///
+/// Deferred debt: a stolen voice is re-tasked immediately with no fast-release
+/// fade. The envelope stays continuous (env is not reset), so only the pitch
+/// jumps — at worst a soft glitch, never a hard click; with 16 voices stealing is
+/// unreachable in normal play. A 1–2 ms steal ramp is a later enhancement.
+fn alloc_index(voices: &[Voice], note: u8) -> usize {
+    // 1. same-note reuse
+    if let Some(i) = voices
+        .iter()
+        .position(|v| v.is_sounding() && v.note == note)
+    {
+        return i;
+    }
+    // 2. first idle
+    if let Some(i) = voices.iter().position(|v| !v.is_sounding()) {
+        return i;
+    }
+    // 3. steal the oldest (smallest age)
+    let mut oldest = 0;
+    for i in 1..voices.len() {
+        if voices[i].age < voices[oldest].age {
+            oldest = i;
+        }
+    }
+    oldest
 }
 
 /// Per-sample ADSR rates, derived once from the device sample rate.
@@ -206,41 +279,46 @@ fn step_env(voice: &mut Voice, adsr: &Adsr) -> f32 {
     current
 }
 
-/// Apply one note event to the voices.  K1: monophonic, last-note priority — a
-/// new note-on takes the single voice; a note-off only releases it if it matches
-/// the sounding note.  (K3 replaces this with real voice allocation/stealing;
-/// the signature over a `&mut [Voice]` slice stays the same.)
-fn apply_event(voices: &mut [Voice], ev: NoteEvent, sample_rate: f32) {
+/// Apply one note event to the pool.  Note-on allocates a voice (`alloc_index`)
+/// and (re)triggers its attack; note-off releases every sounding voice playing
+/// that note.
+fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32) {
     match ev {
         NoteEvent::NoteOn { note } => {
-            let v = &mut voices[0];
+            let i = alloc_index(&pool.voices, note);
+            pool.next_age += 1;
+            let age = pool.next_age;
+            let v = &mut pool.voices[i];
             v.note = note;
             v.phase_delta = TWO_PI * note_to_freq(note) / sample_rate;
             v.stage = EnvStage::Attack;
+            v.age = age;
             // Neither phase nor env is reset: both stay continuous so retriggering
-            // an already-sounding voice has no waveform or amplitude jump (the
-            // attack simply ramps from the current env up to 1).  From silence the
-            // env is already 0, so the attack starts at 0 — no onset click.
+            // (or stealing) a sounding voice has no amplitude jump — the attack
+            // ramps from the current env up to 1.  From silence the env is already
+            // 0, so the attack starts at 0 — no onset click.
         }
         NoteEvent::NoteOff { note } => {
-            let v = &mut voices[0];
-            if v.is_sounding() && v.note == note {
-                v.stage = EnvStage::Release;
-                // K1 simplification (within the AC's "mono / last-note priority"):
-                // releasing the sounding note releases the voice; it does NOT fall
-                // back to an older still-held key.  A held-note stack is a later
-                // enhancement.
+            // Release every voice still playing this note (normally exactly one).
+            // Skipping voices already in Release means a duplicate/late off doesn't
+            // re-release a tail.  No match → no-op (e.g. key-up after a steal).
+            for v in pool.voices.iter_mut() {
+                if v.is_sounding() && v.stage != EnvStage::Release && v.note == note {
+                    v.stage = EnvStage::Release;
+                }
             }
         }
     }
 }
 
 /// Fill `out` with interleaved samples by summing every sounding voice, each
-/// shaped by its ADSR envelope (`amp * env * sin(phase)`).
+/// shaped by its ADSR envelope (`amp * env * sin(phase)`), then scaling the sum
+/// by `MASTER_GAIN` for headroom.
 ///
 /// Stack-only: no allocations, no locks — safe to call from a real-time callback.
-/// For K1/K2 (one voice) the sum stays within `[-amp, amp]` because `env` ≤ 1;
-/// K3 adds headroom scaling for many simultaneous voices.
+/// Each voice contributes at most `amp`, and `MASTER_GAIN = 1/VOICE_COUNT`, so the
+/// written sample is within `[-amp, amp]` for any number of voices and any phases
+/// — the mix can never clip.
 fn render_block(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32, adsr: &Adsr) {
     // cpal always delivers whole interleaved frames, so `out.len()` is a multiple
     // of `channels`; the integer division below therefore drops nothing.
@@ -259,6 +337,7 @@ fn render_block(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32
                 }
             }
         }
+        sample *= MASTER_GAIN; // headroom: bounds the mix to [-amp, amp] by construction
         for ch in 0..channels {
             out[frame * channels + ch] = sample;
         }
@@ -284,6 +363,16 @@ pub struct AudioEngine {
     running: Arc<AtomicBool>,
     pub underruns: Arc<AtomicUsize>,
     pub dropped_events: Arc<AtomicUsize>,
+    /// Number of voices currently sounding, written once per callback block.
+    /// Lets a test prove the engine is actually live and under load (the audio
+    /// callback only runs when a device is open), so the glitch gate cannot pass
+    /// vacuously on a machine with no output device.
+    pub sounding_voices: Arc<AtomicUsize>,
+    /// Set true ONLY when there is no default output device.  Lets the gate skip
+    /// (when explicitly opted in) for a genuinely deviceless machine while still
+    /// hard-failing every other zero-voice cause (stream build/format/play
+    /// failure on a device that *is* present).
+    pub no_device: Arc<AtomicBool>,
     producer: Mutex<Option<NoteProducer>>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -300,6 +389,8 @@ impl AudioEngine {
             running: Arc::new(AtomicBool::new(false)),
             underruns: Arc::new(AtomicUsize::new(0)),
             dropped_events: Arc::new(AtomicUsize::new(0)),
+            sounding_voices: Arc::new(AtomicUsize::new(0)),
+            no_device: Arc::new(AtomicBool::new(false)),
             producer: Mutex::new(None),
             thread: Mutex::new(None),
         }
@@ -322,12 +413,16 @@ impl AudioEngine {
         self.running.store(true, Ordering::SeqCst);
         self.underruns.store(0, Ordering::SeqCst);
         self.dropped_events.store(0, Ordering::SeqCst);
+        self.sounding_voices.store(0, Ordering::SeqCst);
+        self.no_device.store(false, Ordering::SeqCst);
 
         let running = Arc::clone(&self.running);
         let underruns = Arc::clone(&self.underruns);
+        let sounding_voices = Arc::clone(&self.sounding_voices);
+        let no_device = Arc::clone(&self.no_device);
 
         let handle = thread::spawn(move || {
-            audio_thread(running, underruns, consumer);
+            audio_thread(running, underruns, sounding_voices, no_device, consumer);
         });
 
         *guard = Some(handle);
@@ -377,13 +472,23 @@ impl AudioEngine {
 
 /// Owns the `cpal::Stream` for its entire lifetime.  Drains note events and
 /// renders voices until `running` is cleared, then drops the stream and exits.
-fn audio_thread(running: Arc<AtomicBool>, underruns: Arc<AtomicUsize>, mut consumer: NoteConsumer) {
+fn audio_thread(
+    running: Arc<AtomicBool>,
+    underruns: Arc<AtomicUsize>,
+    sounding_voices: Arc<AtomicUsize>,
+    no_device: Arc<AtomicBool>,
+    mut consumer: NoteConsumer,
+) {
     let host = cpal::default_host();
 
     let device = match host.default_output_device() {
         Some(d) => d,
         None => {
             eprintln!("[audio] no default output device — audio thread exiting");
+            // Distinguish "no device" from a stream build/play failure below:
+            // only this path sets no_device, so the gate can skip here yet still
+            // hard-fail every other zero-voice cause.
+            no_device.store(true, Ordering::SeqCst);
             running.store(false, Ordering::SeqCst);
             return;
         }
@@ -434,7 +539,7 @@ fn audio_thread(running: Arc<AtomicBool>, underruns: Arc<AtomicUsize>, mut consu
         buffer_size,
     };
 
-    let mut voices = [Voice::SILENT; VOICE_COUNT];
+    let mut pool = VoicePool::new();
     let adsr = Adsr::new(sr);
 
     let stream = device.build_output_stream(
@@ -445,9 +550,12 @@ fn audio_thread(running: Arc<AtomicBool>, underruns: Arc<AtomicUsize>, mut consu
             assert_no_alloc(|| {
                 // Drain all pending note events (pure index math, no alloc/lock).
                 while let Some(ev) = consumer.try_pop() {
-                    apply_event(&mut voices, ev, sr);
+                    apply_event(&mut pool, ev, sr);
                 }
-                render_block(data, &mut voices, channels, AMPLITUDE, &adsr);
+                render_block(data, &mut pool.voices, channels, AMPLITUDE, &adsr);
+                // Publish how many voices are sounding so a test can confirm the
+                // callback actually ran under load (proves the device is live).
+                sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
             });
         },
         // Error callback: on CoreAudio, underruns surface here.
@@ -513,49 +621,105 @@ mod tests {
         );
     }
 
-    /// Mono / last-note priority: a new note-on takes the voice (entering attack);
-    /// a note-off releases it only if it matches the currently sounding note.
+    // --- STORY-K3: polyphony (allocation / stealing / note-off) -------------
+
+    /// Distinct note-ons fan out to separate voices; once the pool is full, the
+    /// next note steals the OLDEST (smallest age) voice — deterministically.
     #[test]
-    fn last_note_priority_overwrites_and_off_matches() {
-        let mut voices = [Voice::SILENT; VOICE_COUNT];
+    fn voice_allocation_steals_oldest_deterministically() {
+        let mut pool = VoicePool::new();
         let sr = 44_100.0;
 
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 60 }, sr);
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 64 }, sr);
-        assert!(voices[0].is_sounding());
-        assert_eq!(voices[0].note, 64, "latest note-on should take the voice");
+        // Fill every voice with a distinct note (60, 61, …) in order.
+        for k in 0..VOICE_COUNT {
+            apply_event(&mut pool, NoteEvent::NoteOn { note: 60 + k as u8 }, sr);
+        }
+        assert_eq!(pool.sounding_count(), VOICE_COUNT, "pool should be full");
+        assert_eq!(pool.voices[0].note, 60, "voices[0] was allocated first");
 
-        // Off for the overridden note must NOT release the current note.
-        apply_event(&mut voices, NoteEvent::NoteOff { note: 60 }, sr);
-        assert_ne!(
-            voices[0].stage,
-            EnvStage::Release,
-            "note-off for an overridden key released the live note"
+        // One more distinct note → must steal the oldest (voices[0]), not grow.
+        let steal_note = 60 + VOICE_COUNT as u8;
+        apply_event(&mut pool, NoteEvent::NoteOn { note: steal_note }, sr);
+        assert_eq!(pool.sounding_count(), VOICE_COUNT, "stole, didn't grow");
+        assert_eq!(
+            pool.voices[0].note, steal_note,
+            "oldest voice was re-tasked"
         );
-
-        // Off for the sounding note moves it into release (still sounding briefly).
-        apply_event(&mut voices, NoteEvent::NoteOff { note: 64 }, sr);
-        assert_eq!(voices[0].stage, EnvStage::Release);
+        let max_age = pool.voices.iter().map(|v| v.age).max().unwrap();
+        assert_eq!(
+            pool.voices[0].age, max_age,
+            "stolen voice is now the newest"
+        );
     }
 
-    /// A sounding voice renders in-bounds, phase-advancing audio shaped by its
-    /// envelope; an idle voice renders silence.
+    /// Pressing an already-held note reuses its one voice (one note per key) —
+    /// it does not allocate a second, detuned-identical voice.
+    #[test]
+    fn same_note_retrigger_reuses_one_voice() {
+        let mut pool = VoicePool::new();
+        let sr = 44_100.0;
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
+        assert_eq!(pool.sounding_count(), 1, "same note must reuse one voice");
+    }
+
+    /// Note-off releases the matching voice and leaves the others sounding; a
+    /// note-off for a note no voice is playing is a silent no-op.
+    #[test]
+    fn note_off_releases_matching_voice_and_no_match_is_noop() {
+        let mut pool = VoicePool::new();
+        let sr = 44_100.0;
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 64 }, sr);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 67 }, sr);
+
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 64 }, sr);
+        let v64 = pool.voices.iter().find(|v| v.note == 64).unwrap();
+        assert_eq!(v64.stage, EnvStage::Release, "matching note should release");
+        for n in [60u8, 67] {
+            let v = pool.voices.iter().find(|v| v.note == n).unwrap();
+            assert_ne!(
+                v.stage,
+                EnvStage::Release,
+                "a non-matching voice was released"
+            );
+        }
+
+        // No-match note-off changes nothing.
+        let releasing = |p: &VoicePool| {
+            p.voices
+                .iter()
+                .filter(|v| v.stage == EnvStage::Release)
+                .count()
+        };
+        let before = releasing(&pool);
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 99 }, sr);
+        assert_eq!(
+            before,
+            releasing(&pool),
+            "note-off for an unplayed note must be a no-op"
+        );
+    }
+
+    /// A sounding voice renders phase-advancing audio bounded by the single-voice
+    /// ceiling (`amp * MASTER_GAIN`); an idle pool renders silence.
     #[test]
     fn render_block_is_bounded_and_advances_sounding_voice() {
         const FRAMES: usize = 512;
         const CHANNELS: usize = 2;
         let adsr = Adsr::new(44_100.0);
 
-        let mut voices = [Voice::SILENT; VOICE_COUNT];
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 69 }, 44_100.0);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0);
         let mut buf = [0.0f32; FRAMES * CHANNELS];
-        render_block(&mut buf, &mut voices, CHANNELS, AMPLITUDE, &adsr);
+        render_block(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr);
 
-        assert!(voices[0].phase > 0.0, "phase did not advance");
+        assert!(pool.voices[0].phase > 0.0, "phase did not advance");
+        let ceiling = AMPLITUDE * MASTER_GAIN + 1e-6;
         for &s in buf.iter() {
             assert!(
-                (-AMPLITUDE..=AMPLITUDE).contains(&s),
-                "sample {s} out of bounds [-{AMPLITUDE}, {AMPLITUDE}]"
+                s.abs() <= ceiling,
+                "sample {s} exceeds single-voice ceiling {ceiling}"
             );
         }
         assert!(
@@ -563,16 +727,17 @@ mod tests {
             "sounding voice produced silence"
         );
 
-        // Idle voice -> pure silence.
-        let mut silent = [Voice::SILENT; VOICE_COUNT];
+        // Idle pool -> pure silence.
+        let mut silent = VoicePool::new();
         let mut buf2 = [0.0f32; FRAMES * CHANNELS];
-        render_block(&mut buf2, &mut silent, CHANNELS, AMPLITUDE, &adsr);
-        assert!(buf2.iter().all(|&s| s == 0.0), "idle voice produced sound");
+        render_block(&mut buf2, &mut silent.voices, CHANNELS, AMPLITUDE, &adsr);
+        assert!(buf2.iter().all(|&s| s == 0.0), "idle pool produced sound");
     }
 
     /// The load-bearing invariant: the *real* callback hot path — drain events
-    /// via `try_pop` + `apply_event`, then `render_block` — allocates nothing.
-    /// A non-matching note-off is included so every `apply_event` arm runs under
+    /// (fill the pool, a same-note reuse, a steal, a matching off, a non-matching
+    /// off) via `try_pop` + `apply_event`, then `render_block` over the full
+    /// 16-voice mix — allocates nothing. Exercises every `apply_event` path under
     /// the guard.
     #[test]
     fn callback_hot_path_does_not_allocate() {
@@ -583,27 +748,41 @@ mod tests {
         // Build + fill the queue OUTSIDE the no-alloc region (alloc allowed here).
         let rb = HeapRb::<NoteEvent>::new(EVENT_QUEUE_CAPACITY);
         let (mut producer, mut consumer) = rb.split();
-        producer.try_push(NoteEvent::NoteOn { note: 69 }).unwrap();
-        producer.try_push(NoteEvent::NoteOff { note: 70 }).unwrap(); // non-matching
-        producer.try_push(NoteEvent::NoteOn { note: 72 }).unwrap();
+        for k in 0..VOICE_COUNT {
+            producer
+                .try_push(NoteEvent::NoteOn { note: 60 + k as u8 })
+                .unwrap(); // fill the pool
+        }
+        producer.try_push(NoteEvent::NoteOn { note: 60 }).unwrap(); // same-note reuse
+        producer.try_push(NoteEvent::NoteOn { note: 90 }).unwrap(); // force a steal
+        producer.try_push(NoteEvent::NoteOff { note: 64 }).unwrap(); // matching off
+        producer.try_push(NoteEvent::NoteOff { note: 7 }).unwrap(); // non-matching off
 
-        let mut voices = [Voice::SILENT; VOICE_COUNT];
+        let mut pool = VoicePool::new();
         let mut buf = [0.0f32; FRAMES * CHANNELS];
         let adsr = Adsr::new(sr);
+        let sounding_voices = AtomicUsize::new(0);
 
+        // Mirror the real callback exactly: drain + render + publish the count.
         assert_no_alloc(|| {
             while let Some(ev) = consumer.try_pop() {
-                apply_event(&mut voices, ev, sr);
+                apply_event(&mut pool, ev, sr);
             }
-            render_block(&mut buf, &mut voices, CHANNELS, AMPLITUDE, &adsr);
+            render_block(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr);
+            sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
         });
 
+        // The steal re-tasked the oldest voice to note 90; the evicted oldest
+        // note (61) is gone. (The note-off'd voice 64 was released while still at
+        // env 0, so it went Idle on the first render sample — correct behavior.)
         assert!(
-            voices[0].is_sounding(),
-            "voice should be sounding the last note"
+            pool.voices.iter().any(|v| v.note == 90 && v.is_sounding()),
+            "stolen voice should now sound the new note"
         );
-        assert_eq!(voices[0].note, 72);
-        assert!(voices[0].phase > 0.0, "phase did not advance");
+        assert!(
+            !pool.voices.iter().any(|v| v.note == 61),
+            "the evicted (oldest) note should be gone"
+        );
     }
 
     /// Full-queue policy: pushing past capacity never blocks; overflow events are
@@ -717,12 +896,12 @@ mod tests {
     fn render_block_output_is_declicked_at_note_boundaries() {
         const CH: usize = 1;
         let adsr = Adsr::new(44_100.0);
-        let mut voices = [Voice::SILENT; VOICE_COUNT];
+        let mut pool = VoicePool::new();
 
         // Onset: first rendered output sample from silence must be ~0.
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 69 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, 44_100.0);
         let mut first = [0.0f32; 1];
-        render_block(&mut first, &mut voices, CH, AMPLITUDE, &adsr);
+        render_block(&mut first, &mut pool.voices, CH, AMPLITUDE, &adsr);
         assert!(
             first[0].abs() < 1e-3,
             "onset click: first output {} not below -60 dBFS",
@@ -731,20 +910,20 @@ mod tests {
 
         // Drive through attack/decay into sustain, then release and render to Idle.
         let mut warm = [0.0f32; 8192];
-        render_block(&mut warm, &mut voices, CH, AMPLITUDE, &adsr);
-        apply_event(&mut voices, NoteEvent::NoteOff { note: 69 }, 44_100.0);
+        render_block(&mut warm, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 69 }, 44_100.0);
 
         let mut last_nonzero = 0.0f32;
         let mut reached_idle = false;
         for _ in 0..64 {
             let mut block = [0.0f32; 1024];
-            render_block(&mut block, &mut voices, CH, AMPLITUDE, &adsr);
+            render_block(&mut block, &mut pool.voices, CH, AMPLITUDE, &adsr);
             for &s in block.iter() {
                 if s != 0.0 {
                     last_nonzero = s;
                 }
             }
-            if !voices[0].is_sounding() {
+            if !pool.voices[0].is_sounding() {
                 reached_idle = true;
                 break;
             }
@@ -757,39 +936,97 @@ mod tests {
         );
     }
 
-    /// Retrigger continuity (the load-bearing comment in `apply_event`): a note-on
-    /// on an already-sounding voice must NOT reset phase or env — otherwise every
-    /// retrigger clicks.  This pins the invariant against a future "reset the
-    /// oscillator on note-on" edit.
+    /// Retrigger continuity (the load-bearing comment in `apply_event`): a same-note
+    /// note-on reuses the voice and must NOT reset phase or env — otherwise every
+    /// retrigger clicks.  Pins the invariant against a future "reset the oscillator
+    /// on note-on" edit.
     #[test]
     fn retrigger_keeps_phase_and_env_continuous() {
         const CH: usize = 1;
         let adsr = Adsr::new(44_100.0);
-        let mut voices = [Voice::SILENT; VOICE_COUNT];
+        let mut pool = VoicePool::new();
 
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 60 }, 44_100.0);
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0);
         let mut buf = [0.0f32; 512];
-        render_block(&mut buf, &mut voices, CH, AMPLITUDE, &adsr);
-        let phase_before = voices[0].phase;
-        let env_before = voices[0].env;
+        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        let phase_before = pool.voices[0].phase;
+        let env_before = pool.voices[0].env;
         assert!(
             phase_before > 0.0 && env_before > 0.0,
             "voice should be sounding before the retrigger"
         );
 
-        apply_event(&mut voices, NoteEvent::NoteOn { note: 64 }, 44_100.0);
+        // Same-note retrigger reuses the voice; phase/env must be continuous.
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, 44_100.0);
         assert_eq!(
-            voices[0].phase, phase_before,
+            pool.sounding_count(),
+            1,
+            "same-note retrigger reused one voice"
+        );
+        assert_eq!(
+            pool.voices[0].phase, phase_before,
             "retrigger reset phase (would click)"
         );
         assert_eq!(
-            voices[0].env, env_before,
+            pool.voices[0].env, env_before,
             "retrigger reset env (would click)"
         );
         assert_eq!(
-            voices[0].stage,
+            pool.voices[0].stage,
             EnvStage::Attack,
             "retrigger should re-enter attack"
+        );
+    }
+
+    // --- STORY-K3: headroom -------------------------------------------------
+
+    /// Headroom by construction: with every voice at full envelope and maximally
+    /// in phase (worst-case constructive sum), the mix stays within [-1, 1] —
+    /// clipping is impossible — and the peak reaches ~AMPLITUDE (voices really sum).
+    #[test]
+    fn headroom_full_pool_stays_in_bounds() {
+        const CH: usize = 1;
+        let adsr = Adsr::new(44_100.0);
+        let mut pool = VoicePool::new();
+        for v in pool.voices.iter_mut() {
+            v.stage = EnvStage::Decay; // returns env=1.0 on this sample (current-before-advance)
+            v.env = 1.0;
+            v.phase = std::f32::consts::FRAC_PI_2; // sin = 1.0
+            v.phase_delta = 0.0; // hold phase so every sample is the worst case
+        }
+        let mut buf = [0.0f32; 64];
+        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+
+        for &s in buf.iter() {
+            assert!(
+                (-1.0..=1.0).contains(&s),
+                "mix clipped: sample {s} outside [-1, 1]"
+            );
+        }
+        let peak = buf.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+        assert!(
+            peak > AMPLITUDE - 0.05,
+            "full-pool peak {peak} far below the AMPLITUDE ceiling — voices not summing"
+        );
+    }
+
+    /// The headroom scaling must not crush a lone note to silence.
+    #[test]
+    fn single_voice_is_audibly_loud() {
+        const CH: usize = 1;
+        let adsr = Adsr::new(44_100.0);
+        let mut pool = VoicePool::new();
+        pool.voices[0].stage = EnvStage::Sustain;
+        pool.voices[0].env = adsr.sustain;
+        pool.voices[0].phase = std::f32::consts::FRAC_PI_2;
+        pool.voices[0].phase_delta = 0.0;
+
+        let mut buf = [0.0f32; 16];
+        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &adsr);
+        let peak = buf.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+        assert!(
+            peak > 0.01,
+            "single voice peak {peak} too quiet (crushed by headroom)"
         );
     }
 

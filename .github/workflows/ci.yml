@@ -49,7 +49,11 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         # Unit + integration tests. The 60s glitch gate is #[ignore]d (audible,
-        # device-dependent) and does not run here.
+        # device-dependent) and does not run here. The non-ignored polyphony_smoke
+        # DOES run; headless runners have no audio device, so allow it to skip on
+        # no-device here (it stays a hard failure on a developer machine).
+        env:
+          GLITCH_ALLOW_NO_DEVICE: "1"
         run: cargo test
 
       # --- UI checks ---
