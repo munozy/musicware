@@ -91,9 +91,15 @@ jobs:
             fi
             sleep 1
           done
-          SwitchAudioSource -t output -s "BlackHole 2ch" || true
-          echo "Output devices available:"
-          SwitchAudioSource -a -t output || true
+          SwitchAudioSource -t output -s "BlackHole 2ch"
+          # Verify BlackHole actually became the default — fail loudly here rather
+          # than letting the downstream gate fail with an ambiguous "no device".
+          for i in $(seq 1 10); do
+            if SwitchAudioSource -c -t output | grep -q "BlackHole 2ch"; then break; fi
+            sleep 1
+          done
+          SwitchAudioSource -c -t output | grep -q "BlackHole 2ch"
+          echo "Default output is now: $(SwitchAudioSource -c -t output)"
 
       - name: Run the 16-voice polyphony smoke (must NOT skip)
         working-directory: src-tauri

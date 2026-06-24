@@ -262,5 +262,6 @@ describe("useRecorder — rename / delete / persistence", () => {
     const ids = result.current.recordings.map((r) => r.id);
     expect(ids).toContain(bId);
     expect(ids).not.toContain(aId);
+    expect(loadRecordings().map((r) => r.id)).not.toContain(aId); // a stayed finalized in storage
   });
 });

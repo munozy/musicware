@@ -120,7 +120,9 @@ describe("Recorder UI", () => {
 
     // Rename → on commit, focus returns to the name (Rename) button.
     fireEvent.click(screen.getByLabelText("Rename Composition 1"));
-    fireEvent.keyDown(screen.getByLabelText("New name"), { key: "Enter" });
+    act(() => {
+      fireEvent.keyDown(screen.getByLabelText("New name"), { key: "Enter" });
+    });
     expect(document.activeElement).toBe(screen.getByLabelText("Rename Composition 1"));
 
     // Delete → focus moves to the Undo control (not lost on the removed row).

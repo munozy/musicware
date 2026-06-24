@@ -29,7 +29,9 @@ function Recorder() {
   // After a delete, move focus to Undo so a keyboard user isn't stranded on the
   // removed row (WCAG 2.4.3) and can immediately recover.
   useEffect(() => {
-    if (pendingDelete) undoBtnRef.current?.focus();
+    if (pendingDelete && document.activeElement !== undoBtnRef.current) {
+      undoBtnRef.current?.focus();
+    }
   }, [pendingDelete]);
 
   const handleUndo = () => {

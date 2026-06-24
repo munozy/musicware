@@ -133,7 +133,9 @@ export function useRecorder() {
 
   // Soft delete: drop the take from the list (and storage) immediately, but stash
   // it for UNDO_MS so a misclick is recoverable. Only one undo slot — a second
-  // delete finalizes the previous one (it stays removed).
+  // delete finalizes the previous one (it stays removed). The undo is in-memory
+  // ONLY: the take is already gone from localStorage, so closing the app during
+  // the window makes the deletion final.
   const remove = useCallback(
     (id: string) => {
       const index = recordings.findIndex((r) => r.id === id);
