@@ -61,3 +61,42 @@ jobs:
         run: npm run build
       - name: vitest
         run: npm test
+
+  # DEBT-015: actually EXERCISE the headline fitness function on push, instead of
+  # letting it skip on a deviceless runner. BlackHole is a userspace CoreAudio HAL
+  # plugin (not a kext), so it loads on a coreaudiod restart with no reboot — giving
+  # the hosted macOS runner a real default output device. The smoke then runs WITHOUT
+  # GLITCH_ALLOW_NO_DEVICE, so a missing device or any underrun is a hard failure.
+  audio-smoke:
+    name: audio smoke · 16-voice gate (BlackHole)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install BlackHole virtual audio device
+        run: |
+          brew install blackhole-2ch switchaudio-osx
+          # Restart CoreAudio so it discovers the freshly-installed HAL plugin.
+          sudo killall coreaudiod || true
+          # Wait for the device to appear (cold start), then make it the default output.
+          for i in $(seq 1 30); do
+            if SwitchAudioSource -a -t output 2>/dev/null | grep -q "BlackHole 2ch"; then
+              break
+            fi
+            sleep 1
+          done
+          SwitchAudioSource -t output -s "BlackHole 2ch" || true
+          echo "Output devices available:"
+          SwitchAudioSource -a -t output || true
+
+      - name: Run the 16-voice polyphony smoke (must NOT skip)
+        working-directory: src-tauri
+        # No GLITCH_ALLOW_NO_DEVICE: with BlackHole present the gate runs for real —
+        # asserts the full 16-voice pool sounds with 0 underruns and 0 dropped events.
+        run: cargo test --test glitch_free_60s polyphony_smoke -- --nocapture
