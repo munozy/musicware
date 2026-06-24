@@ -24,6 +24,8 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Underrun** — The audio callback fails to deliver a buffer in time, causing an audible glitch/dropout. The primary symptom of the Python GIL/GC feasibility risk.
 - **Latency** — Time from input/action to audible output. MVP target: round-trip under 20 ms; engine buffer stable at 512 samples.
 - **Sample rate** — Samples per second of audio (e.g. 44.1 kHz). Fixed for the MVP.
+- **Master volume** — The single user output level in `[0, 1]` (default 0.6) applied to the whole rendered mix as `level × VOLUME_GAIN_MAX` (ADR-0003). `level == 1.0` reads as single-note full scale. An output/monitor setting — orthogonal to notes/presets and **not** recorded.
+- **Limiter** — The post-render output stage that hard-clamps every sample to `[-1, 1]` after the master-volume scale (`apply_master_volume`, ADR-0003). Guarantees a valid sample to the DAC by construction; in practice it is the audible ceiling (a dense chord can reach it).
 
 ## Synthesis terms
 
@@ -36,6 +38,9 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Note event** — A **note-on** (start a pitch) or **note-off** (release it), issued by the UI and delivered to the real-time thread via the ring buffer. Drives voice allocation.
 - **Note number / pitch** — A note is identified by an integer note number; its frequency is `f = 440·2^((n−69)/12)` (A4 = 69 = 440 Hz). This is pitch math, **not** MIDI I/O.
 - **Preset** — A named timbre = a waveform + an envelope, selectable live (e.g. Sine / Organ / Piano). The waveform applies to all voices; each voice captures its envelope preset at note-on (STORY-K4).
+- **Recording** — A saved take: a named, timestamped stream of the UI's note/preset events, captured at the synth dispatch choke point and persisted to `localStorage` (ADR-0002). Symbolic events, **not** audio.
+- **Take** — One captured performance from record-start to stop — the unit a Recording holds. Held notes are auto-closed at stop so a take is self-contained; an empty take (no note-ons) is discarded.
+- **Replay** — Playing back a Recording by re-dispatching its events to the engine on a schedule (ADR-0002). Uses the same dispatch path as live play, so it sounds the same and lights the same keys.
 
 ## Architecture terms
 

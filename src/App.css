@@ -248,3 +248,187 @@ button {
   border-radius: 4px;
   background: rgba(127, 127, 127, 0.12);
 }
+
+/* ------------------------------------------------------------------ */
+/* Master volume                                                      */
+/* ------------------------------------------------------------------ */
+
+.volume {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.6rem auto 0;
+  width: max-content;
+}
+
+.vol-icon {
+  font-size: 1rem;
+}
+
+.vol-btn {
+  width: 2.2em;
+  padding: 0.2em 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  box-shadow: none;
+}
+
+.vol-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.vol-slider {
+  width: 220px;
+  accent-color: #396cd8;
+  padding: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.vol-pct {
+  color: #888;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 3em;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------ */
+/* Composition recorder                                               */
+/* ------------------------------------------------------------------ */
+
+.recorder {
+  width: max-content;
+  max-width: 90%;
+  margin: 1rem auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.rec-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 1.1em;
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d11;
+  display: inline-block;
+}
+
+.rec-btn.armed {
+  background: #d11;
+  color: #fff;
+  border-color: #d11;
+}
+
+.rec-btn.armed .rec-dot {
+  background: #fff;
+  animation: rec-blink 1s steps(2, start) infinite;
+}
+
+@keyframes rec-blink {
+  to {
+    opacity: 0.25;
+  }
+}
+
+.rec-status {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.rec-empty {
+  color: #888;
+  font-size: 0.85rem;
+  text-align: center;
+  margin: 0;
+}
+
+.rec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rec-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.rec-row.playing {
+  border-color: #396cd8;
+  box-shadow: inset 0 0 0 1px #396cd8;
+}
+
+.rec-row button {
+  box-shadow: none;
+  padding: 0.25em 0.6em;
+}
+
+.rec-play {
+  width: 2.2em;
+}
+
+.rec-name,
+.rec-name-edit {
+  flex: 1 1 auto;
+  text-align: left;
+  min-width: 8rem;
+  background: transparent;
+  border-color: transparent;
+}
+
+.rec-name:hover {
+  border-color: #ccc;
+}
+
+.rec-name-edit {
+  border: 1px solid #396cd8;
+  background: #fff;
+}
+
+.rec-dur {
+  color: #888;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 3em;
+  text-align: right;
+}
+
+.rec-del {
+  color: #d11;
+}
+
+@media (prefers-color-scheme: dark) {
+  .rec-row {
+    background: #0f0f0f98;
+    border-color: #444;
+  }
+  .rec-name,
+  .rec-name-edit {
+    color: #fff;
+  }
+}

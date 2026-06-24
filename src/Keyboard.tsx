@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { noteOn, noteOff, subscribeNotes } from "./synth";
 
 // 61-key layout: C1 (note 24) up to C6 (note 84) — five octaves (36 white + 25 black).
 const FIRST_NOTE = 24; // C1
@@ -89,30 +89,41 @@ function Keyboard() {
   const keyToNote = useRef<Map<string, number>>(new Map());
   const octaveBaseRef = useRef<number>(DEFAULT_OCTAVE_BASE);
   const [octaveBase, setOctaveBase] = useState<number>(DEFAULT_OCTAVE_BASE);
-  // Notes currently held — drives the on-screen highlight (mouse or computer key).
-  const [heldNotes, setHeldNotes] = useState<ReadonlySet<number>>(new Set());
+  // Notes currently sounding — drives the on-screen highlight. Sourced from the
+  // synth's note broadcast so it reflects BOTH live play and recording replay, in
+  // sync. A per-note refcount keeps it correct when a note is played by replay
+  // while also held live.
+  const soundCounts = useRef<Map<number, number>>(new Map());
+  const [soundingNotes, setSoundingNotes] = useState<ReadonlySet<number>>(new Set());
+
+  useEffect(() => {
+    return subscribeNotes(({ kind, note }) => {
+      const counts = soundCounts.current;
+      const next = (counts.get(note) ?? 0) + (kind === "on" ? 1 : -1);
+      if (next > 0) counts.set(note, next);
+      else counts.delete(note);
+      setSoundingNotes(new Set(counts.keys()));
+    });
+  }, []);
 
   const press = useCallback((note: number) => {
     if (held.current.has(note)) return; // already sounding — ignore duplicate down
     held.current.add(note);
-    setHeldNotes(new Set(held.current));
-    invoke("note_on", { note }).catch((e) => console.error("note_on failed", e));
+    noteOn(note);
   }, []);
 
   const release = useCallback((note: number) => {
     if (!held.current.has(note)) return; // not currently held
     held.current.delete(note);
-    setHeldNotes(new Set(held.current));
-    invoke("note_off", { note }).catch((e) => console.error("note_off failed", e));
+    noteOff(note);
   }, []);
 
   const releaseAll = useCallback(() => {
     for (const note of held.current) {
-      invoke("note_off", { note }).catch((e) => console.error("note_off failed", e));
+      noteOff(note);
     }
     held.current.clear();
     keyToNote.current.clear();
-    setHeldNotes(new Set());
   }, []);
 
   // Computer-keyboard input (STORY-K5): map physical keys to notes, suppress OS
@@ -182,7 +193,7 @@ function Keyboard() {
             const mapped = note >= octaveBase && note <= octaveBase + 12;
             const cls =
               `key ${isBlack ? "black" : "white"}` +
-              `${heldNotes.has(note) ? " held" : ""}${mapped ? " mapped" : ""}`;
+              `${soundingNotes.has(note) ? " held" : ""}${mapped ? " mapped" : ""}`;
             return (
               <button
                 key={note}

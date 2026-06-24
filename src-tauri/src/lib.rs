@@ -47,6 +47,13 @@ fn set_preset(engine: State<AudioEngine>, index: u8) {
     engine.set_preset(index);
 }
 
+/// Set the master volume level in [0, 1].  Clamped, so any value is safe; takes
+/// effect within ~one audio block.
+#[tauri::command]
+fn set_volume(engine: State<AudioEngine>, level: f32) {
+    engine.set_volume(level);
+}
+
 // ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
@@ -61,7 +68,8 @@ pub fn run() {
             stop_engine,
             note_on,
             note_off,
-            set_preset
+            set_preset,
+            set_volume
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

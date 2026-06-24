@@ -5,6 +5,25 @@ import { cleanup } from "@testing-library/react";
 // across tests (we don't enable vitest `globals`, so register this explicitly).
 afterEach(() => cleanup());
 
+// jsdom's localStorage in this version doesn't expose a working Storage API
+// (no clear()). The recorder persists takes there, so install a complete,
+// Map-backed Storage shim that behaves like the real thing.
+{
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    key: (i: number) => Array.from(store.keys())[i] ?? null,
+  };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true });
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+}
+
 // jsdom does not implement PointerEvent. The keyboard uses pointer events
 // (onPointerDown/Up/Leave/Cancel), so provide a minimal polyfill backed by
 // MouseEvent — enough for fireEvent.pointerDown/pointerUp in tests.

@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import App from "./App";
+import { saveRecordings } from "./recordings";
 
 // Mock the Tauri IPC boundary — assert the commands the keyboard dispatches,
 // without a running backend.
@@ -148,5 +149,40 @@ describe("computer keyboard (STORY-K5 mapping)", () => {
     const offs = callsFor("note_off");
     expect(offs).toHaveLength(1);
     expect(offs[0][1]).toEqual({ note: 48 }); // not 36 — no stranded note
+  });
+});
+
+describe("keyboard highlights replay in sync", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(invoke).mockClear();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("lights a key when replay sounds it and clears it when the note ends", () => {
+    vi.useFakeTimers();
+    saveRecordings([
+      {
+        id: "r1",
+        name: "Composition 1",
+        createdAt: 0,
+        durationMs: 500,
+        events: [
+          { t: 0, kind: "preset", index: 0 },
+          { t: 0, kind: "on", note: 60 },
+          { t: 300, kind: "off", note: 60 },
+        ],
+      },
+    ]);
+    render(<App />);
+    const keyC = screen.getByRole("button", { name: /note 60/ });
+    expect(keyC.className).not.toContain("held");
+
+    fireEvent.click(screen.getByLabelText("Play Composition 1"));
+    act(() => vi.advanceTimersByTime(10)); // fire the t=0 note_on
+    expect(keyC.className).toContain("held");
+
+    act(() => vi.advanceTimersByTime(350)); // fire the t=300 note_off
+    expect(keyC.className).not.toContain("held");
   });
 });

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { setPreset } from "./synth";
 
 // Indices must match `PRESETS` in src-tauri/src/audio.rs.
 const PRESETS = [
@@ -19,7 +19,7 @@ function PresetSelector() {
 
   const choose = (index: number) => {
     setSelected(index);
-    invoke("set_preset", { index }).catch((e) => console.error("set_preset failed", e));
+    setPreset(index);
   };
 
   return (

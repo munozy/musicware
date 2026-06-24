@@ -72,7 +72,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, StreamConfig};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -97,11 +97,24 @@ const PREFERRED_BUFFER_FRAMES: u32 = 512;
 /// of this constant, so it is a one-line change.
 pub const VOICE_COUNT: usize = 16;
 
-/// Headroom scale applied to the summed voices.  Each voice contributes at most
-/// `AMPLITUDE`, so `sum(N voices) * MASTER_GAIN <= AMPLITUDE < 1.0` for any N and
-/// any phases — the mix can never clip, and the scale is constant so there is no
-/// zipper/pumping as voices enter and leave.
+/// Headroom scale applied to the summed voices inside `render_block`.  Each voice
+/// contributes at most `AMPLITUDE`, so `sum(N voices) * MASTER_GAIN <= AMPLITUDE`
+/// for any N and any phases — the render itself can never clip, and the scale is
+/// constant so there is no zipper/pumping as voices enter and leave.
 const MASTER_GAIN: f32 = 1.0 / VOICE_COUNT as f32;
+
+/// Volume gain at `level == 1.0`.  `render_block` already attenuates a single full
+/// voice to `AMPLITUDE * MASTER_GAIN`; multiplying by this brings it back to full
+/// scale, so the user's `level` knob reads as "single-note peak amplitude" (0..1).
+/// The post-render limiter (`apply_master_volume`) hard-clamps the result, so
+/// driving the level up can never emit an out-of-range sample — clipping the DAC
+/// is impossible by construction; the knob just trades headroom for loudness.
+const VOLUME_GAIN_MAX: f32 = VOICE_COUNT as f32 / AMPLITUDE;
+
+/// Default master level — the old fixed `MASTER_GAIN`-only path made a single note
+/// peak at ~0.05 (−26 dB), which was too quiet.  0.6 is ~12× louder yet leaves the
+/// limiter room before chords reach full scale.
+const DEFAULT_VOLUME: f32 = 0.6;
 
 /// Capacity of the note-event queue.  Drained every ~11 ms block, so steady-state
 /// occupancy is ~0–2; 256 gives orders-of-magnitude headroom against a burst.
@@ -647,6 +660,17 @@ fn render_block(
     }
 }
 
+/// Apply the user's master volume to an already-rendered buffer, then hard-clamp
+/// every sample to [-1, 1].  `gain` is the post-render multiplier (`level *
+/// VOLUME_GAIN_MAX`).  The clamp is a limiter: however hard the level is driven,
+/// the output is always a valid sample — so the engine cannot emit anything the
+/// DAC would wrap or distort, for any number of voices.  Stack-only, alloc-free.
+fn apply_master_volume(out: &mut [f32], gain: f32) {
+    for s in out.iter_mut() {
+        *s = (*s * gain).clamp(-1.0, 1.0);
+    }
+}
+
 /// Push a note event onto the producer, or drop it and count the drop if the
 /// queue is full.  Never blocks, spins, or allocates — safe even though it runs
 /// on the (non-real-time) control thread.
@@ -679,6 +703,9 @@ pub struct AudioEngine {
     /// Selected preset index (clamped to `0..PRESET_COUNT`), read once per block by
     /// the audio thread.  Persists across engine restarts (not reset in start/stop).
     preset: Arc<AtomicU8>,
+    /// Master volume level in [0, 1] (f32 bits), read once per block by the audio
+    /// thread.  Persists across engine restarts.
+    volume: Arc<AtomicU32>,
     producer: Mutex<Option<NoteProducer>>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -698,6 +725,7 @@ impl AudioEngine {
             sounding_voices: Arc::new(AtomicUsize::new(0)),
             no_device: Arc::new(AtomicBool::new(false)),
             preset: Arc::new(AtomicU8::new(0)), // 0 = Sine (default)
+            volume: Arc::new(AtomicU32::new(DEFAULT_VOLUME.to_bits())),
             producer: Mutex::new(None),
             thread: Mutex::new(None),
         }
@@ -708,6 +736,17 @@ impl AudioEngine {
     pub fn set_preset(&self, index: u8) {
         let clamped = index.min(PRESET_COUNT as u8 - 1);
         self.preset.store(clamped, Ordering::Relaxed);
+    }
+
+    /// Set the master volume level, clamped to [0, 1] so any UI value is safe
+    /// (NaN coerces to 0). Takes effect within one audio block (~11 ms).
+    pub fn set_volume(&self, level: f32) {
+        let clamped = if level.is_nan() {
+            0.0
+        } else {
+            level.clamp(0.0, 1.0)
+        };
+        self.volume.store(clamped.to_bits(), Ordering::Relaxed);
     }
 
     /// Start the audio thread (silent until note events arrive).
@@ -735,6 +774,7 @@ impl AudioEngine {
         let sounding_voices = Arc::clone(&self.sounding_voices);
         let no_device = Arc::clone(&self.no_device);
         let preset = Arc::clone(&self.preset);
+        let volume = Arc::clone(&self.volume);
 
         let handle = thread::spawn(move || {
             audio_thread(
@@ -743,6 +783,7 @@ impl AudioEngine {
                 sounding_voices,
                 no_device,
                 preset,
+                volume,
                 consumer,
             );
         });
@@ -800,6 +841,7 @@ fn audio_thread(
     sounding_voices: Arc<AtomicUsize>,
     no_device: Arc<AtomicBool>,
     preset: Arc<AtomicU8>,
+    volume: Arc<AtomicU32>,
     mut consumer: NoteConsumer,
 ) {
     let host = cpal::default_host();
@@ -889,6 +931,11 @@ fn audio_thread(
                     waveform,
                     &adsr_table,
                 );
+                // Apply the live master volume (read once per block) and limit —
+                // the only stage that scales by user gain; the clamp guarantees a
+                // valid output sample no matter how hard the level is driven.
+                let level = f32::from_bits(volume.load(Ordering::Relaxed));
+                apply_master_volume(data, level * VOLUME_GAIN_MAX);
                 // Publish how many voices are sounding so a test can confirm the
                 // callback actually ran under load (proves the device is live).
                 sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
@@ -1122,9 +1169,11 @@ mod tests {
         let mut buf = [0.0f32; FRAMES * CHANNELS];
         let adsr_table = build_adsr_table(sr);
         let sounding_voices = AtomicUsize::new(0);
+        let volume = AtomicU32::new(DEFAULT_VOLUME.to_bits());
 
-        // Mirror the real callback for EVERY waveform: drain + render + publish,
-        // all under the no-alloc guard (additive's harmonic loop included).
+        // Mirror the real callback for EVERY waveform: drain + render + volume-limit
+        // + publish, all under the no-alloc guard (additive's harmonic loop AND the
+        // master-volume post-process included).
         assert_no_alloc(|| {
             while let Some(ev) = consumer.try_pop() {
                 apply_event(&mut pool, ev, sr, 1); // capture preset 1 (Organ)
@@ -1138,6 +1187,8 @@ mod tests {
                     wf,
                     &adsr_table,
                 );
+                let level = f32::from_bits(volume.load(Ordering::Relaxed));
+                apply_master_volume(&mut buf, level * VOLUME_GAIN_MAX);
             }
             sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
         });
@@ -1837,6 +1888,88 @@ mod tests {
         );
         engine.set_preset(1);
         assert_eq!(engine.preset.load(Ordering::Relaxed), 1);
+    }
+
+    /// `set_volume` clamps to [0, 1] (and maps NaN to 0) so any UI value is safe,
+    /// and the engine boots at the louder default.
+    #[test]
+    fn set_volume_clamps_and_defaults() {
+        let engine = AudioEngine::new();
+        assert_eq!(
+            f32::from_bits(engine.volume.load(Ordering::Relaxed)),
+            DEFAULT_VOLUME,
+            "engine should boot at the default level"
+        );
+        let level = |e: &AudioEngine| f32::from_bits(e.volume.load(Ordering::Relaxed));
+
+        engine.set_volume(2.5);
+        assert_eq!(level(&engine), 1.0, "above-range level clamps to 1.0");
+        engine.set_volume(-1.0);
+        assert_eq!(level(&engine), 0.0, "below-range level clamps to 0.0");
+        engine.set_volume(0.42);
+        assert!(
+            (level(&engine) - 0.42).abs() < 1e-7,
+            "in-range level is kept"
+        );
+        engine.set_volume(f32::NAN);
+        assert_eq!(
+            level(&engine),
+            0.0,
+            "NaN coerces to 0 (mute), never propagates"
+        );
+    }
+
+    /// The master limiter scales below full scale and HARD-clamps above it — so the
+    /// engine can never emit an out-of-range sample however hard the level is driven.
+    #[test]
+    fn master_volume_scales_then_clamps() {
+        // Below the ceiling: linear scaling.
+        let mut buf = [0.5f32, -0.5, 0.25, -0.25];
+        apply_master_volume(&mut buf, 1.5);
+        assert!((buf[0] - 0.75).abs() < 1e-6);
+        assert!((buf[1] + 0.75).abs() < 1e-6);
+
+        // Driven hard: every sample is clamped into [-1, 1], none escapes.
+        let mut hot = [0.9f32, -0.9, 0.4, -0.7, 1.0, -1.0];
+        apply_master_volume(&mut hot, VOLUME_GAIN_MAX); // ~20×
+        for &s in hot.iter() {
+            assert!((-1.0..=1.0).contains(&s), "limiter let {s} escape [-1, 1]");
+        }
+        assert_eq!(hot[0], 1.0, "a loud positive sample pins to +1");
+        assert_eq!(hot[1], -1.0, "a loud negative sample pins to -1");
+    }
+
+    /// The volume mapping is calibrated so `level == 1.0` brings a single full voice
+    /// (which `render_block` attenuates to `AMPLITUDE * MASTER_GAIN`) up to ±1.0 —
+    /// i.e. the knob reads as single-note peak amplitude.
+    #[test]
+    fn level_one_brings_a_single_voice_to_full_scale() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0); // one Sine voice
+        let v = pool.voices.iter_mut().find(|v| v.note == 69).unwrap();
+        v.stage = EnvStage::Decay; // force full envelope
+        v.env = 1.0;
+        v.phase = std::f32::consts::FRAC_PI_2; // sin = 1 → the voice's peak sample
+
+        let mut buf = [0.0f32; 1];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Sine,
+            &table,
+        );
+        // Pre-volume, the single voice peaks at AMPLITUDE * MASTER_GAIN.
+        assert!((buf[0] - AMPLITUDE * MASTER_GAIN).abs() < 1e-4);
+        apply_master_volume(&mut buf, 1.0 * VOLUME_GAIN_MAX);
+        assert!(
+            (buf[0] - 1.0).abs() < 1e-3,
+            "level 1.0 should bring a single full voice to ±1.0, got {}",
+            buf[0]
+        );
     }
 
     /// Switching the waveform changes the rendered output (the audible-timbre AC),
