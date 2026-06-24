@@ -13,8 +13,9 @@
     "windows": [
       {
         "title": "musicware",
-        "width": 800,
-        "height": 600
+        "width": 1140,
+        "height": 640,
+        "minWidth": 720
       }
     ],
     "security": {

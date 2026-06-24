@@ -55,8 +55,8 @@
 //! Waveforms & presets (STORY-K4)
 //! ==============================
 //! `eval_waveform` provides selectable oscillator shapes (sine / saw / square /
-//! triangle / additive), each bounded to [-1, 1] so the headroom proof holds for
-//! any waveform.  A `Preset` bundles a waveform with an `AdsrSpec`; the selected
+//! triangle + two additive registrations: organ drawbars and an electric piano),
+//! each bounded to [-1, 1] so the headroom proof holds for any waveform.  A `Preset` bundles a waveform with an `AdsrSpec`; the selected
 //! preset (e.g. Sine / Organ / Piano) is an `AtomicU8` read once per block.  The
 //! waveform applies live to all voices; each voice captures its envelope preset at
 //! note-on (so an in-flight note keeps its envelope when the preset changes).
@@ -81,6 +81,13 @@ use std::thread::{self, JoinHandle};
 /// `AMPLITUDE` even with all voices at full envelope and in phase (see `render_block`).
 /// 0.8 keeps single notes audible while leaving headroom below full scale (1.0).
 const AMPLITUDE: f32 = 0.8;
+
+/// Envelope floor for exponential decay/release: a geometric tail never reaches
+/// exactly 0, so below this the voice snaps to silence/Idle and frees.  1e-4
+/// (−80 dBFS) is a decade below the −60 dBFS declick threshold, so it's inaudible.
+const ENV_FLOOR: f32 = 1.0e-4;
+/// ln(1000) — an exponential decay's T60 (−60 dB) factor is `e^(-LN_1000/(T60·sr))`.
+const LN_1000: f32 = 6.907_755;
 
 /// Preferred buffer size in frames (512 ≈ 11 ms at 44.1 kHz).
 const PREFERRED_BUFFER_FRAMES: u32 = 512;
@@ -107,40 +114,79 @@ const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
 // ---------------------------------------------------------------------------
 
 /// Oscillator shape.  `Copy` so it crosses the callback boundary by value.
+/// `Organ`, `EPiano` and `Bell` are additive registrations (see the harmonic tables).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Waveform {
     Sine,
     Saw,
     Square,
     Triangle,
-    Additive,
+    Organ,
+    EPiano,
+    Bell,
 }
 
-/// Drawbar-style 1/k harmonic amplitudes for the additive (organ-ish) waveform.
-const ADDITIVE_AMPS: [f32; 8] = [
-    1.0,
-    1.0 / 2.0,
-    1.0 / 3.0,
-    1.0 / 4.0,
-    1.0 / 5.0,
-    1.0 / 6.0,
-    1.0 / 7.0,
-    1.0 / 8.0,
-];
-/// Σ of the partial amplitudes (rounded *up* past the f32 sum of `ADDITIVE_AMPS`).
-/// Dividing the raw sum by this maps the additive waveform into [-1, 1] *by
-/// construction* (|Σ aₖ·sin| ≤ Σ aₖ ≤ NORM), preserving the headroom proof
-/// regardless of how the amplitudes are later retuned. (True Σ 1/k for k=1..=8 ≈
-/// 2.7178571; rounded up so the bound is provably ≤ 1.0 even with f32 rounding.)
-const ADDITIVE_NORM: f32 = 2.717_858;
+/// Organ registration — Hammond drawbar-style: fundamental, octaves (k2,k4,k8)
+/// and a fifth (k3,k6), with the buzzy odd partials (k5,k7) dropped, for a warm,
+/// round tone rather than the saw-like 1/k series.
+const ORGAN_HARMONICS: [f32; 8] = [1.0, 0.7, 0.5, 0.4, 0.0, 0.25, 0.0, 0.2];
+/// Piano registration — a full, smoothly-decreasing harmonic series (fundamental
+/// through the 8th, rolling off) → a rich, warm struck-string tone (paired with the
+/// exponential ring-down envelope).
+const EPIANO_HARMONICS: [f32; 8] = [1.0, 0.55, 0.4, 0.28, 0.18, 0.12, 0.08, 0.05];
+/// Normalisers ≥ Σ|harmonics|, so each additive waveform is in [-1, 1] *by
+/// construction* (|Σ aₖ·sin| ≤ Σ aₖ ≤ NORM) — preserving the headroom proof.
+const ORGAN_NORM: f32 = 3.06; // Σ = 3.05
+const EPIANO_NORM: f32 = 2.67; // Σ = 2.66
+
+/// Bell — INHARMONIC church-bell partials (frequency ratios relative to the played
+/// note): hum (½ below), prime, the minor-third TIERCE (1.2 — the signature bell
+/// overtone the ear recognises), fifth, nominal (octave), and two higher partials.
+/// The non-integer ratios are what make it read as a bell rather than an organ.
+/// Each voice runs an independent phase per partial, so a non-integer ratio causes
+/// no 2π-wrap discontinuity (see `render_block`'s Bell branch).
+const BELL_PARTIALS: usize = 7;
+const BELL_RATIOS: [f32; BELL_PARTIALS] = [0.5, 1.0, 1.2, 1.5, 2.0, 2.4, 3.0];
+const BELL_AMPS: [f32; BELL_PARTIALS] = [0.5, 1.0, 0.6, 0.4, 0.45, 0.2, 0.15];
+const BELL_NORM: f32 = 3.31; // ≥ Σ|amps| (3.30) → bell ∈ [-1,1] by construction
+
+/// Per-partial decay time (T60, seconds).  THE defining bell cue is *differential*
+/// decay: the bright high partials (the metallic "clang" of the strike) die in
+/// ~1 s while the hum (½) and prime ring on for many seconds — that bright→pure
+/// transition is what the ear hears as a bell rather than a static inharmonic
+/// chord.  Index 0 (the hum) is the longest-lived and MUST be the max — the main
+/// envelope (preset 3) uses this same T60 so the per-partial gains below are purely
+/// *relative* to it (see `Voice::bell_decay`).
+const BELL_T60: [f32; BELL_PARTIALS] = [8.0, 6.0, 5.0, 3.5, 3.0, 1.5, 1.0];
+const BELL_T60_MAX: f32 = BELL_T60[0]; // the hum — slowest decay, == the main env's T60
+
+/// Sum of 8 integer harmonics at `phase`, normalised into [-1, 1] (`norm` ≥ Σ|amps|).
+/// Stack-only fixed loop — no allocation.  (Organ/EPiano; the Bell is inharmonic.)
+fn additive_sum(phase: f32, amps: &[f32; 8], norm: f32) -> f32 {
+    let mut sum = 0.0f32;
+    for k in 1..=amps.len() {
+        sum += amps[k - 1] * (k as f32 * phase).sin();
+    }
+    sum / norm
+}
+
+/// The inharmonic bell spectrum sampled at a single `phase` (for `eval_waveform` /
+/// bounds tests).  The live voice render uses per-partial phases in `render_block`.
+fn bell_at(phase: f32) -> f32 {
+    let mut sum = 0.0f32;
+    for p in 0..BELL_PARTIALS {
+        sum += BELL_AMPS[p] * (BELL_RATIOS[p] * phase).sin();
+    }
+    sum / BELL_NORM
+}
 
 /// Evaluate a waveform at `phase ∈ [0, 2π)`.  Pure function of phase; every
 /// branch returns strictly within [-1, 1] (the precondition the `MASTER_GAIN`
 /// headroom proof depends on).
 ///
-/// DEBT: these are *naive* (not band-limited) oscillators — Saw and Square alias
-/// audibly on high notes (harmonics fold past Nyquist). Acceptable/instructive for
-/// a C3–C5 learning keyboard; band-limiting (PolyBLEP / wavetable) is a future story.
+/// DEBT: Saw and Square are *naive* (not band-limited) — they alias audibly on
+/// high notes (harmonics fold past Nyquist). Acceptable/instructive for a learning
+/// keyboard; band-limiting (PolyBLEP / wavetable) is a future story.
 fn eval_waveform(kind: Waveform, phase: f32) -> f32 {
     let t = phase * (1.0 / TWO_PI); // normalized phase ∈ [0, 1)
     match kind {
@@ -154,19 +200,26 @@ fn eval_waveform(kind: Waveform, phase: f32) -> f32 {
             }
         }
         Waveform::Triangle => 1.0 - 4.0 * (t - 0.5).abs(), // -1 at t=0, +1 at t=0.5
-        Waveform::Additive => {
-            let mut sum = 0.0f32;
-            for k in 1..=ADDITIVE_AMPS.len() {
-                sum += ADDITIVE_AMPS[k - 1] * (k as f32 * phase).sin();
-            }
-            sum / ADDITIVE_NORM
-        }
+        Waveform::Organ => additive_sum(phase, &ORGAN_HARMONICS, ORGAN_NORM),
+        Waveform::EPiano => additive_sum(phase, &EPIANO_HARMONICS, EPIANO_NORM),
+        Waveform::Bell => bell_at(phase),
     }
 }
 
 // ---------------------------------------------------------------------------
 // Presets (STORY-K4): a waveform + an envelope, selectable live
 // ---------------------------------------------------------------------------
+
+/// Envelope decay/release shape.  `Linear` ramps at a constant per-sample rate
+/// (organ-style).  `Exponential` multiplies by a per-sample coefficient — a
+/// fast-drop-then-long-tail ring-down, the defining amplitude cue of a struck
+/// string (piano).  For `Exponential` presets, `decay_secs`/`release_secs` are
+/// reinterpreted as the **T60** (time to fall 60 dB), not "time to reach target".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EnvShape {
+    Linear,
+    Exponential,
+}
 
 /// Sample-rate-independent ADSR spec (times in seconds).  Built into the
 /// per-sample `Adsr` via `Adsr::from_spec`.
@@ -176,6 +229,7 @@ struct AdsrSpec {
     decay_secs: f32,
     sustain: f32,
     release_secs: f32,
+    shape: EnvShape,
 }
 
 /// A timbre: an oscillator waveform plus its envelope shape. (Display names live
@@ -186,7 +240,7 @@ struct Preset {
     adsr: AdsrSpec,
 }
 
-pub const PRESET_COUNT: usize = 3;
+pub const PRESET_COUNT: usize = 4;
 
 /// The selectable presets.  Index 0 (Sine) reproduces the pre-K4 sound exactly.
 static PRESETS: [Preset; PRESET_COUNT] = [
@@ -198,27 +252,44 @@ static PRESETS: [Preset; PRESET_COUNT] = [
             decay_secs: 0.060,
             sustain: 0.7,
             release_secs: 0.120,
+            shape: EnvShape::Linear,
         },
     },
-    // 1: "Organ" — rich additive + high sustain → a held, harmonically-warm drone.
+    // 1: "Organ" — drawbar additive + fast attack + high sustain → a warm held drone.
     Preset {
-        waveform: Waveform::Additive,
+        waveform: Waveform::Organ,
         adsr: AdsrSpec {
-            attack_secs: 0.010,
-            decay_secs: 0.040,
-            sustain: 0.85,
-            release_secs: 0.150,
+            attack_secs: 0.006,
+            decay_secs: 0.050,
+            sustain: 0.9,
+            release_secs: 0.110,
+            shape: EnvShape::Linear,
         },
     },
-    // 2: "Piano" — triangle + percussive ADSR (sustain 0, long decay) → plucks and
-    // fades while the key is held, unmistakably distinct from the organ.
+    // 2: "Piano" — warm additive + EXPONENTIAL ring-down (the struck-string amplitude
+    // cue): fast initial drop, long tail. decay/release are T60 times.
     Preset {
-        waveform: Waveform::Triangle,
+        waveform: Waveform::EPiano,
         adsr: AdsrSpec {
             attack_secs: 0.003,
-            decay_secs: 0.600,
+            decay_secs: 2.500, // T60: fast drop, long natural ring
             sustain: 0.0,
-            release_secs: 0.200,
+            release_secs: 0.180, // T60: damper falls promptly on key-up
+            shape: EnvShape::Exponential,
+        },
+    },
+    // 3: "Bells" — inharmonic registration with DIFFERENTIAL per-partial decay.
+    // The main env decays at the hum's rate (BELL_T60_MAX = 8 s); the per-partial
+    // gains (see Voice::bell_decay) fade the bright partials faster, giving the
+    // bell's struck "clang → long pure hum" ring-down.
+    Preset {
+        waveform: Waveform::Bell,
+        adsr: AdsrSpec {
+            attack_secs: 0.002,
+            decay_secs: 8.000, // T60 == BELL_T60_MAX (the hum): bells ring for seconds
+            sustain: 0.0,
+            release_secs: 0.400, // a softer damper than the piano
+            shape: EnvShape::Exponential,
         },
     },
 ];
@@ -277,6 +348,16 @@ struct Voice {
     env: f32,   // current envelope amplitude, 0..1
     age: u64,   // allocation sequence number — larger = more recently triggered
     preset: u8, // preset captured at note-on — selects this voice's envelope
+    // Independent phase per Bell partial (inert for other waveforms). One phase per
+    // inharmonic partial keeps each sin continuous across its own 2π wrap.
+    bell_phases: [f32; BELL_PARTIALS],
+    // Per-partial gain RELATIVE to the main envelope, and its per-sample decay
+    // multiplier (computed from `BELL_T60` at strike).  The main env decays at the
+    // hum's rate (`BELL_T60_MAX`); these multiply on top so each partial's *net*
+    // decay is its own `BELL_T60[p]` — the bright partials fade first.  Inert
+    // (gain 1, decay 1) for non-bell voices.
+    bell_gain: [f32; BELL_PARTIALS],
+    bell_decay: [f32; BELL_PARTIALS],
 }
 
 impl Voice {
@@ -288,6 +369,9 @@ impl Voice {
         env: 0.0,
         age: 0,
         preset: 0,
+        bell_phases: [0.0; BELL_PARTIALS],
+        bell_gain: [1.0; BELL_PARTIALS],
+        bell_decay: [1.0; BELL_PARTIALS],
     };
 
     /// Is this voice contributing sound (anything but fully released)?
@@ -357,23 +441,35 @@ fn alloc_index(voices: &[Voice], note: u8) -> usize {
 /// Per-sample ADSR rates, derived once from the device sample rate.
 #[derive(Clone, Copy)]
 struct Adsr {
-    attack_inc: f32,  // env rise per sample during attack
-    decay_inc: f32,   // env fall per sample during decay
-    release_inc: f32, // env fall per sample during release
+    attack_inc: f32,   // env rise per sample during attack
+    decay_inc: f32,    // env fall per sample during linear decay
+    release_inc: f32,  // env fall per sample during linear release
+    decay_mult: f32,   // per-sample factor during exponential decay (∈ (0,1))
+    release_mult: f32, // per-sample factor during exponential release (∈ (0,1))
     sustain: f32,
+    shape: EnvShape,
 }
 
 impl Adsr {
-    /// Build per-sample increments from a sample-rate-independent spec.
-    /// `release_inc` ramps from full scale (1.0) to 0 over `release_secs` — so it
-    /// reaches silence from *any* level, including a `sustain` of 0 (a release
-    /// rate of `sustain/release` would be 0 there and never free the voice).
+    /// Build per-sample rates from a sample-rate-independent spec.  Both the linear
+    /// increments and the exponential multipliers are computed; `step_env` uses
+    /// whichever matches `shape`.  For exponential, `decay_secs`/`release_secs` are
+    /// T60 times: the per-sample factor is `10^(-3 / (T60·sr)) = e^(-ln1000/(T60·sr))`.
+    /// `exp()` runs here (once, off the audio thread), never in the callback.
     fn from_spec(spec: AdsrSpec, sample_rate: f32) -> Self {
+        let decay_samples = (spec.decay_secs * sample_rate).max(1.0);
+        let release_samples = (spec.release_secs * sample_rate).max(1.0);
         Self {
             attack_inc: 1.0 / (spec.attack_secs * sample_rate).max(1.0),
-            decay_inc: (1.0 - spec.sustain) / (spec.decay_secs * sample_rate).max(1.0),
-            release_inc: 1.0 / (spec.release_secs * sample_rate).max(1.0),
+            // Linear: ramp from full scale to 0/sustain (reaches silence from any
+            // level, incl. sustain 0 — a `sustain/release` rate would stall there).
+            decay_inc: (1.0 - spec.sustain) / decay_samples,
+            release_inc: 1.0 / release_samples,
+            // Exponential: geometric ring-down over the T60 (factor in (0,1)).
+            decay_mult: (-LN_1000 / decay_samples).exp(),
+            release_mult: (-LN_1000 / release_samples).exp(),
             sustain: spec.sustain,
+            shape: spec.shape,
         }
     }
 }
@@ -393,23 +489,48 @@ fn step_env(voice: &mut Voice, adsr: &Adsr) -> f32 {
                 voice.stage = EnvStage::Decay;
             }
         }
-        EnvStage::Decay => {
-            voice.env -= adsr.decay_inc;
-            if voice.env <= adsr.sustain {
-                voice.env = adsr.sustain;
-                voice.stage = EnvStage::Sustain;
+        EnvStage::Decay => match adsr.shape {
+            EnvShape::Linear => {
+                voice.env -= adsr.decay_inc;
+                if voice.env <= adsr.sustain {
+                    voice.env = adsr.sustain;
+                    voice.stage = EnvStage::Sustain;
+                }
             }
-        }
+            EnvShape::Exponential => {
+                voice.env *= adsr.decay_mult; // geometric ring-down
+                if voice.env <= ENV_FLOOR.max(adsr.sustain) {
+                    if adsr.sustain > ENV_FLOOR {
+                        voice.env = adsr.sustain;
+                        voice.stage = EnvStage::Sustain;
+                    } else {
+                        // The geometric tail never reaches exactly 0 — snap to
+                        // silence below the floor so the voice frees (reaches Idle).
+                        voice.env = 0.0;
+                        voice.stage = EnvStage::Idle;
+                    }
+                }
+            }
+        },
         EnvStage::Sustain => {
             voice.env = adsr.sustain;
         }
-        EnvStage::Release => {
-            voice.env -= adsr.release_inc;
-            if voice.env <= 0.0 {
-                voice.env = 0.0;
-                voice.stage = EnvStage::Idle;
+        EnvStage::Release => match adsr.shape {
+            EnvShape::Linear => {
+                voice.env -= adsr.release_inc;
+                if voice.env <= 0.0 {
+                    voice.env = 0.0;
+                    voice.stage = EnvStage::Idle;
+                }
             }
-        }
+            EnvShape::Exponential => {
+                voice.env *= adsr.release_mult;
+                if voice.env <= ENV_FLOOR {
+                    voice.env = 0.0;
+                    voice.stage = EnvStage::Idle;
+                }
+            }
+        },
     }
     current
 }
@@ -432,6 +553,20 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32, current_pr
             // preset is switched while it sounds (set on every alloc path: reuse,
             // first-idle, and steal).
             v.preset = current_preset;
+            // For a Bell strike, restore the bright partials (gain → 1) and recompute
+            // each partial's per-sample RELATIVE decay from its T60: a partial faster
+            // than the hum (BELL_T60_MAX) decays by the *difference* in rate, so its
+            // net decay (hum env × relative) is exactly its own BELL_T60[p].  The hum
+            // itself gets relative decay 1.0.  bell_gain ≤ 1 always → boundedness held.
+            if PRESETS[current_preset as usize].waveform == Waveform::Bell {
+                for (p, &t60) in BELL_T60.iter().enumerate() {
+                    v.bell_gain[p] = 1.0;
+                    let extra_rate = 1.0 / t60 - 1.0 / BELL_T60_MAX; // ≥ 0
+                    v.bell_decay[p] = (-LN_1000 * extra_rate / sample_rate.max(1.0)).exp();
+                }
+            }
+            // bell_phases are NOT reset: leaving them continuous avoids a click on a
+            // bell re-strike; from silence the attack ramps from env 0 anyway.
             // Neither phase nor env is reset: both stay continuous so retriggering
             // (or stealing) a sounding voice has no amplitude jump — the attack
             // ramps from the current env up to 1.  From silence the env is already
@@ -475,7 +610,28 @@ fn render_block(
         for v in voices.iter_mut() {
             if v.is_sounding() {
                 let env = step_env(v, &adsr_table[v.preset as usize]);
-                sample += amp * env * eval_waveform(waveform, v.phase);
+                // Bell sums INHARMONIC partials, each on its own phase accumulator so
+                // a non-integer ratio causes no 2π-wrap discontinuity; bounded to
+                // [-1,1] by /BELL_NORM. Every other waveform takes the unchanged
+                // single-phase `eval_waveform` path (byte-identical).
+                let s = if waveform == Waveform::Bell {
+                    let mut acc = 0.0f32;
+                    for p in 0..BELL_PARTIALS {
+                        // Each partial's amplitude is its registration weight scaled by
+                        // its relative gain, so high partials thin out as the strike
+                        // settles into the hum (the bell's bright→pure decay).
+                        acc += BELL_AMPS[p] * v.bell_gain[p] * v.bell_phases[p].sin();
+                        v.bell_phases[p] += v.phase_delta * BELL_RATIOS[p];
+                        while v.bell_phases[p] >= TWO_PI {
+                            v.bell_phases[p] -= TWO_PI;
+                        }
+                        v.bell_gain[p] *= v.bell_decay[p]; // ≤ 1 → never grows
+                    }
+                    acc / BELL_NORM
+                } else {
+                    eval_waveform(waveform, v.phase)
+                };
+                sample += amp * env * s;
                 v.phase += v.phase_delta;
                 // `while` (not `if`) so the wrap holds even if phase_delta ever
                 // exceeds 2π (absurdly high note numbers); normal notes loop once.
@@ -798,12 +954,14 @@ mod tests {
         render_block(out, voices, channels, amp, Waveform::Sine, &table);
     }
 
-    const ALL_WAVEFORMS: [Waveform; 5] = [
+    const ALL_WAVEFORMS: [Waveform; 7] = [
         Waveform::Sine,
         Waveform::Saw,
         Waveform::Square,
         Waveform::Triangle,
-        Waveform::Additive,
+        Waveform::Organ,
+        Waveform::EPiano,
+        Waveform::Bell,
     ];
 
     /// Pitch math: f = 440 * 2^((n-69)/12), A4 = 69 = 440 Hz.
@@ -1346,21 +1504,189 @@ mod tests {
         );
     }
 
-    /// The additive waveform stays bounded AND is not crushed (peak > 0.5),
-    /// proving the `/ADDITIVE_NORM` normalization keeps it audible.
+    /// The additive registrations (Organ, EPiano, Bell) stay bounded AND are not
+    /// crushed (peak > 0.5), proving the `/NORM` normalisation keeps them audible.
     #[test]
-    fn waveform_additive_is_bounded_and_audible() {
-        let mut peak = 0.0f32;
-        for i in 0..200_000 {
-            let phase = (i as f32 / 200_000.0) * TWO_PI;
-            let s = eval_waveform(Waveform::Additive, phase);
-            assert!((-1.0..=1.0).contains(&s), "additive {s} out of bounds");
-            peak = peak.max(s.abs());
+    fn additive_registrations_bounded_and_audible() {
+        for wf in [Waveform::Organ, Waveform::EPiano, Waveform::Bell] {
+            let mut peak = 0.0f32;
+            for i in 0..200_000 {
+                let phase = (i as f32 / 200_000.0) * TWO_PI;
+                let s = eval_waveform(wf, phase);
+                assert!((-1.0..=1.0).contains(&s), "{wf:?} sample {s} out of bounds");
+                peak = peak.max(s.abs());
+            }
+            assert!(peak > 0.5, "{wf:?} peak {peak} too low (over-normalized?)");
         }
+    }
+
+    // --- Bell (inharmonic additive synthesis) -------------------------------
+
+    /// The bell registration is bounded by construction: `BELL_NORM` is ≥ the sum
+    /// of partial amplitudes, so `bell_at` (and the per-voice render path) can never
+    /// leave [-1, 1] — the headroom proof holds for the bell like every other
+    /// waveform.
+    #[test]
+    fn bell_norm_bounds_registration() {
+        let sum: f32 = BELL_AMPS.iter().sum();
         assert!(
-            peak > 0.5,
-            "additive peak {peak} too low (over-normalized?)"
+            BELL_NORM >= sum,
+            "BELL_NORM ({BELL_NORM}) must be ≥ Σ|amps| ({sum}) so the bell is bounded"
         );
+        // Sweep one period: the normalised waveform never escapes [-1, 1].
+        for i in 0..4096 {
+            let phase = i as f32 / 4096.0 * TWO_PI;
+            let s = bell_at(phase);
+            assert!(
+                (-1.0..=1.0).contains(&s),
+                "bell_at({phase}) = {s} out of range"
+            );
+        }
+    }
+
+    /// The defining cue of a bell is its INHARMONIC spectrum — partials at
+    /// non-integer ratios, in particular the minor-third "tierce" (1.2) that gives a
+    /// church bell its recognisable colour. Guards against anyone "tidying" the
+    /// ratios back to a harmonic (integer) series, which would kill the bell timbre.
+    #[test]
+    fn bell_ratios_are_inharmonic_with_minor_third() {
+        assert!(
+            BELL_RATIOS.contains(&1.2),
+            "bell must include the minor-third tierce (1.2) — its signature partial"
+        );
+        let any_noninteger = BELL_RATIOS.iter().any(|r| (r - r.round()).abs() > 1e-6);
+        assert!(
+            any_noninteger,
+            "bell spectrum must be inharmonic (some non-integer ratio), not a harmonic series"
+        );
+        assert_eq!(
+            BELL_AMPS.len(),
+            BELL_PARTIALS,
+            "amps must cover every partial"
+        );
+        assert_eq!(
+            BELL_RATIOS.len(),
+            BELL_PARTIALS,
+            "ratios must cover every partial"
+        );
+    }
+
+    /// A full pool of bell voices at full envelope renders within [-1, 1] — the
+    /// per-partial phase-accumulator path is bounded just like `bell_at`.
+    #[test]
+    fn bell_render_is_bounded() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        for k in 0..VOICE_COUNT {
+            apply_event(&mut pool, NoteEvent::NoteOn { note: 48 + k as u8 }, sr, 3);
+            // 3 = Bell
+        }
+        for v in pool.voices.iter_mut() {
+            v.stage = EnvStage::Decay; // force full envelope (loudest case)
+            v.env = 1.0;
+        }
+        let mut buf = [0.0f32; 1024];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Bell,
+            &table,
+        );
+        for &s in buf.iter() {
+            assert!((-1.0..=1.0).contains(&s), "bell mix clipped: {s}");
+        }
+    }
+
+    /// Each bell partial advances on its OWN phase accumulator at its ratio's rate,
+    /// so a non-integer ratio (e.g. the 1.2 tierce) wraps independently and never
+    /// glitches at the 2π boundary. After a render every phase stays in [0, 2π).
+    #[test]
+    fn bell_partial_phases_stay_wrapped() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 72 }, sr, 3); // a high bell → many wraps
+        let mut buf = [0.0f32; 4096];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Bell,
+            &table,
+        );
+        let v = pool.voices.iter().find(|x| x.note == 72).unwrap();
+        for (p, &ph) in v.bell_phases.iter().enumerate() {
+            assert!(
+                (0.0..TWO_PI).contains(&ph),
+                "partial {p} phase {ph} not wrapped into [0, 2π)"
+            );
+        }
+    }
+
+    /// The hum (partial 0) is the longest-lived and the main bell envelope decays at
+    /// exactly that rate — the invariant the relative per-partial decays depend on.
+    #[test]
+    fn bell_hum_is_slowest_and_drives_main_env() {
+        let max = BELL_T60.iter().cloned().fold(0.0f32, f32::max);
+        assert_eq!(
+            BELL_T60[0], max,
+            "the hum (index 0) must be the slowest partial"
+        );
+        assert_eq!(BELL_T60_MAX, max, "BELL_T60_MAX must equal the slowest T60");
+        assert_eq!(
+            PRESETS[3].adsr.decay_secs, BELL_T60_MAX,
+            "main bell env must decay at the hum's rate so per-partial decays are relative"
+        );
+    }
+
+    /// Differential decay: a bright high partial loses far more of its relative gain
+    /// than the hum over the same span — the bell's "clang → pure hum" transition.
+    /// Without this the inharmonic chord decays uniformly and reads as an organ.
+    #[test]
+    fn bell_high_partials_decay_faster_than_hum() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, 3);
+        // Render ~1 s.
+        let mut buf = [0.0f32; 4096];
+        for _ in 0..((sr as usize) / 4096 + 1) {
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Bell,
+                &table,
+            );
+        }
+        let v = pool.voices.iter().find(|x| x.note == 60).unwrap();
+        // Hum gain barely moves (relative decay ≈ 1); the top partial (shortest T60)
+        // has shed most of its gain.
+        assert!(
+            v.bell_gain[0] > 0.99,
+            "hum relative gain should stay ~1 (was {})",
+            v.bell_gain[0]
+        );
+        assert!(
+            v.bell_gain[BELL_PARTIALS - 1] < 0.2,
+            "top partial should have decayed sharply after ~1 s (was {})",
+            v.bell_gain[BELL_PARTIALS - 1]
+        );
+        // Monotone in partial index: faster T60 ⇒ less remaining gain.
+        for p in 1..BELL_PARTIALS {
+            assert!(
+                v.bell_gain[p] <= v.bell_gain[p - 1] + 1e-6,
+                "partial {p} (T60 {}) should not outlast partial {} (T60 {})",
+                BELL_T60[p],
+                p - 1,
+                BELL_T60[p - 1]
+            );
+        }
     }
 
     /// `eval_waveform` is a pure function of phase (no hidden state).
@@ -1392,9 +1718,17 @@ mod tests {
     /// "audibly distinct" AC).
     #[test]
     fn presets_distinct_organ_vs_piano() {
-        assert_eq!(PRESETS[1].waveform, Waveform::Additive, "organ = additive");
+        assert_eq!(
+            PRESETS[1].waveform,
+            Waveform::Organ,
+            "organ = organ registration"
+        );
         assert!(PRESETS[1].adsr.sustain >= 0.8, "organ should sustain");
-        assert_eq!(PRESETS[2].waveform, Waveform::Triangle, "piano = triangle");
+        assert_eq!(
+            PRESETS[2].waveform,
+            Waveform::EPiano,
+            "piano = e-piano registration"
+        );
         assert_eq!(PRESETS[2].adsr.sustain, 0.0, "piano should not sustain");
         assert!(
             PRESETS[2].adsr.decay_secs >= 0.3,
@@ -1427,6 +1761,67 @@ mod tests {
         assert!(
             reached_idle && v.env == 0.0,
             "piano voice never reached silence"
+        );
+    }
+
+    /// Exponential decay (the piano) stays in [0,1], is monotonically decreasing,
+    /// and snaps to Idle/0 at the floor — so the geometric tail still frees the voice.
+    #[test]
+    fn piano_exp_decay_stays_in_unit_interval_and_reaches_idle() {
+        assert_eq!(PRESETS[2].adsr.shape, EnvShape::Exponential);
+        let piano = Adsr::from_spec(PRESETS[2].adsr, 44_100.0);
+        let mut v = Voice::SILENT;
+        v.stage = EnvStage::Decay;
+        v.env = 1.0;
+        let mut prev = 2.0f32;
+        let mut reached_idle = false;
+        for _ in 0..2_000_000 {
+            let e = step_env(&mut v, &piano);
+            assert!((0.0..=1.0).contains(&e), "exp decay env {e} out of [0,1]");
+            assert!(e <= prev, "exp decay must be monotonically non-increasing");
+            prev = e;
+            if v.stage == EnvStage::Idle {
+                reached_idle = true;
+                break;
+            }
+        }
+        assert!(
+            reached_idle && v.env == 0.0,
+            "exp decay never reached Idle/0"
+        );
+    }
+
+    /// Exponential decay drops faster in the first 200 ms than a linear decay of the
+    /// same nominal time — the concave "fast initial drop" that reads as a struck string.
+    #[test]
+    fn exp_decay_drops_faster_initially_than_linear() {
+        let sr = 44_100.0;
+        let exp = Adsr::from_spec(PRESETS[2].adsr, sr); // piano: exponential
+                                                        // A linear decay of the SAME nominal time, for a fair shape comparison.
+        let lin = Adsr::from_spec(
+            AdsrSpec {
+                attack_secs: 0.003,
+                decay_secs: PRESETS[2].adsr.decay_secs,
+                sustain: 0.0,
+                release_secs: 0.18,
+                shape: EnvShape::Linear,
+            },
+            sr,
+        );
+        let env_after_200ms = |adsr: &Adsr| {
+            let mut v = Voice::SILENT;
+            v.stage = EnvStage::Decay;
+            v.env = 1.0;
+            for _ in 0..(0.2 * sr) as usize {
+                step_env(&mut v, adsr);
+            }
+            v.env
+        };
+        let e = env_after_200ms(&exp);
+        let l = env_after_200ms(&lin);
+        assert!(
+            e < l,
+            "exponential decay should drop faster initially than linear ({e} vs {l})"
         );
     }
 

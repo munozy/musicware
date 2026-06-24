@@ -65,13 +65,13 @@ describe("keyboard (STORY-K1)", () => {
     expect(offs[0][1]).toEqual({ note: 65 });
   });
 
-  it("renders a 25-key, two-octave surface (15 white + 10 black) spanning C3–C5", () => {
+  it("renders a 61-key, five-octave surface (36 white + 25 black) spanning C1–C6", () => {
     render(<App />);
     // Count only keyboard keys (their labels contain "note N"), not the preset buttons.
-    expect(screen.getAllByRole("button", { name: /note \d/ })).toHaveLength(25);
-    // Range endpoints exist: C3 (note 48) and C5 (note 72).
-    expect(screen.getByRole("button", { name: /note 48/ })).toBeDefined();
-    expect(screen.getByRole("button", { name: /note 72/ })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /note \d/ })).toHaveLength(61);
+    // Range endpoints exist: C1 (note 24) and C6 (note 84).
+    expect(screen.getByRole("button", { name: /note 24/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /note 84/ })).toBeDefined();
   });
 });
 
@@ -82,15 +82,15 @@ describe("computer keyboard (STORY-K5 mapping)", () => {
 
   it("maps a physical key to its note on keydown and releases it on keyup", () => {
     render(<App />);
-    fireEvent.keyDown(window, { key: "a" }); // A → C at the default octave (C4 = 60)
+    fireEvent.keyDown(window, { key: "a" }); // A → C at the default octave (C3 = 48)
     fireEvent.keyUp(window, { key: "a" });
 
     const ons = callsFor("note_on");
     const offs = callsFor("note_off");
     expect(ons).toHaveLength(1);
-    expect(ons[0][1]).toEqual({ note: 60 });
+    expect(ons[0][1]).toEqual({ note: 48 });
     expect(offs).toHaveLength(1);
-    expect(offs[0][1]).toEqual({ note: 60 });
+    expect(offs[0][1]).toEqual({ note: 48 });
   });
 
   it("suppresses OS auto-repeat (a held key fires one note_on)", () => {
@@ -104,30 +104,49 @@ describe("computer keyboard (STORY-K5 mapping)", () => {
 
   it("plays a held chord — multiple keys sound at once", () => {
     render(<App />);
-    fireEvent.keyDown(window, { key: "a" }); // C4 = 60
-    fireEvent.keyDown(window, { key: "d" }); // E4 = 64
-    fireEvent.keyDown(window, { key: "g" }); // G4 = 67
+    fireEvent.keyDown(window, { key: "a" }); // C3 = 48
+    fireEvent.keyDown(window, { key: "d" }); // E3 = 52
+    fireEvent.keyDown(window, { key: "g" }); // G3 = 55
 
     const notes = callsFor("note_on").map(([, arg]) => (arg as { note: number }).note);
-    expect(notes).toEqual([60, 64, 67]);
+    expect(notes).toEqual([48, 52, 55]);
   });
 
-  it("octave shift (X) transposes subsequent notes up an octave", () => {
+  it("octave shift X/Z transposes from the C3 default up to C4 and down to C2", () => {
     render(<App />);
-    fireEvent.keyDown(window, { key: "x" }); // octave up → base C5 (72)
+    fireEvent.keyDown(window, { key: "x" }); // C3 → C4 (base 60)
     fireEvent.keyDown(window, { key: "a" });
+    expect(callsFor("note_on")[0][1]).toEqual({ note: 60 });
 
-    expect(callsFor("note_on")[0][1]).toEqual({ note: 72 });
+    vi.mocked(invoke).mockClear();
+    fireEvent.keyDown(window, { key: "z" }); // C4 → C3
+    fireEvent.keyDown(window, { key: "z" }); // C3 → C2 (base 36)
+    fireEvent.keyDown(window, { key: "s" }); // D at C2 = 38
+    expect(callsFor("note_on")[0][1]).toEqual({ note: 38 });
+  });
+
+  it("clamps the octave at the C1 floor and C5 ceiling", () => {
+    render(<App />);
+    // Down past C1 (default C3 → C2 → C1 → clamp).
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(window, { key: "z" });
+    fireEvent.keyDown(window, { key: "a" });
+    expect(callsFor("note_on")[0][1]).toEqual({ note: 24 }); // C1
+
+    vi.mocked(invoke).mockClear();
+    // Up past C5 (→ clamp at base 72, top key 'k' = 84 = C6).
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(window, { key: "x" });
+    fireEvent.keyDown(window, { key: "k" });
+    expect(callsFor("note_on")[0][1]).toEqual({ note: 84 }); // C6
   });
 
   it("releases the originally-pressed note even if the octave shifts while held", () => {
     render(<App />);
-    fireEvent.keyDown(window, { key: "a" }); // note 60
-    fireEvent.keyDown(window, { key: "x" }); // octave up while 'a' is still held
+    fireEvent.keyDown(window, { key: "a" }); // note 48 (default C3)
+    fireEvent.keyDown(window, { key: "z" }); // octave down while 'a' is still held
     fireEvent.keyUp(window, { key: "a" });
 
     const offs = callsFor("note_off");
     expect(offs).toHaveLength(1);
-    expect(offs[0][1]).toEqual({ note: 60 }); // not 72 — no stranded note
+    expect(offs[0][1]).toEqual({ note: 48 }); // not 36 — no stranded note
   });
 });

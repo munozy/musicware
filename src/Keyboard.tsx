@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-// 25-key layout: C3 (note 48) up to C5 (note 72) — two octaves, the standard
-// 25-key controller span (15 white + 10 black keys).
-const FIRST_NOTE = 48; // C3
-const KEY_COUNT = 25; // C3..C5 inclusive
-const WHITE_WIDTH = 36; // px — keep in sync with .key.white width in App.css
-const BLACK_WIDTH = 22; // px — keep in sync with .key.black width in App.css
+// 61-key layout: C1 (note 24) up to C6 (note 84) — five octaves (36 white + 25 black).
+const FIRST_NOTE = 24; // C1
+const KEY_COUNT = 61; // C1..C6 inclusive
+const WHITE_WIDTH = 30; // px — keep in sync with .key.white width in App.css
+const BLACK_WIDTH = 18; // px — keep in sync with .key.black width in App.css
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 // Pitch classes (note % 12) that are white keys.
@@ -32,9 +31,11 @@ const KEY_TO_OFFSET: Record<string, number> = {
 };
 const OCTAVE_DOWN_KEY = "z";
 const OCTAVE_UP_KEY = "x";
-const DEFAULT_OCTAVE_BASE = 60; // C4
+const DEFAULT_OCTAVE_BASE = 48; // C3
+// Clamp the octave base so the mapped one-octave span stays within the on-screen
+// C1–C6 range (C1 base → C1–C2 … C5 base → C5–C6).
 const OCTAVE_BASE_MIN = 24; // C1
-const OCTAVE_BASE_MAX = 96; // C7
+const OCTAVE_BASE_MAX = 72; // C5
 
 type KeyDef = {
   note: number;
@@ -61,7 +62,7 @@ function buildKeys(): { keys: KeyDef[]; whiteCount: number } {
       keys.push({
         note,
         name,
-        label: cls === 0 ? `C${octave}` : NOTE_NAMES[cls],
+        label: cls === 0 ? `C${octave}` : "", // label only the C of each octave
         isBlack,
         left: whiteCount * WHITE_WIDTH,
       });
@@ -75,8 +76,8 @@ const { keys: KEYS, whiteCount: WHITE_COUNT } = buildKeys();
 const KEYBOARD_WIDTH = WHITE_COUNT * WHITE_WIDTH;
 
 /**
- * On-screen + computer keyboard (STORY-K1/K2/K3 engine; 25-key surface, plus the
- * STORY-K5 computer-key mapping pulled forward so chords can be *held*).
+ * On-screen + computer keyboard (STORY-K1/K2/K3 engine; 61-key C1–C6 surface, plus
+ * the STORY-K5 computer-key mapping pulled forward so chords can be *held*).
  *
  * Each key sends `note_on` on press and `note_off` on release. A held-note set
  * makes press idempotent so pointer quirks (pointerup AND pointerleave) and OS
@@ -174,28 +175,34 @@ function Keyboard() {
 
   return (
     <>
-      <div className="keyboard" style={{ width: KEYBOARD_WIDTH }}>
-        {KEYS.map(({ note, name, label, isBlack, left }) => {
-          const cls = `key ${isBlack ? "black" : "white"}${heldNotes.has(note) ? " held" : ""}`;
-          return (
-            <button
-              key={note}
-              type="button"
-              className={cls}
-              data-note={note}
-              aria-label={`${name} (note ${note})`}
-              style={{ left }}
-              {...handlers(note)}
-            >
-              {label && <span className="key-label">{label}</span>}
-            </button>
-          );
-        })}
+      <div className="keyboard-scroll">
+        <div className="keyboard" style={{ width: KEYBOARD_WIDTH }}>
+          {KEYS.map(({ note, name, label, isBlack, left }) => {
+            // The octave the computer keys currently control (Z/X to shift).
+            const mapped = note >= octaveBase && note <= octaveBase + 12;
+            const cls =
+              `key ${isBlack ? "black" : "white"}` +
+              `${heldNotes.has(note) ? " held" : ""}${mapped ? " mapped" : ""}`;
+            return (
+              <button
+                key={note}
+                type="button"
+                className={cls}
+                data-note={note}
+                aria-label={`${name} (note ${note})`}
+                style={{ left }}
+                {...handlers(note)}
+              >
+                {label && <span className="key-label">{label}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <p className="kbd-hint">
         Computer keys: <kbd>A</kbd>–<kbd>K</kbd> white, <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd>{" "}
-        <kbd>Y</kbd> <kbd>U</kbd> black · <kbd>Z</kbd>/<kbd>X</kbd> octave (now {octaveLabel}). Hold
-        several to play chords.
+        <kbd>Y</kbd> <kbd>U</kbd> black · <kbd>Z</kbd>/<kbd>X</kbd> octave. The highlighted band
+        shows the computer-key octave (now <strong>{octaveLabel}</strong>). Hold several to play chords.
       </p>
     </>
   );
