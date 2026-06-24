@@ -38,6 +38,14 @@ fn run_gate(secs: u64) {
         .start()
         .expect("FAIL: could not start the audio engine");
 
+    // Time the heaviest render path: the additive Organ waveform (8 harmonics per
+    // voice), not the default single-sine. The waveform is global (read per block),
+    // so this makes the gate exercise worst-case per-sample cost under full
+    // polyphony — DEBT-015's intent. Sleep so the audio thread reads the new preset
+    // before the notes are drained.
+    engine.set_preset(1); // 1 = Organ (additive)
+    std::thread::sleep(Duration::from_millis(50));
+
     // Sound VOICE_COUNT distinct notes (no note-offs → they stay held).
     for note in 60u8..(60 + VOICE_COUNT as u8) {
         engine

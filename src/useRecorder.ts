@@ -9,6 +9,12 @@ import {
   type Recording,
 } from "./recordings";
 
+/** How long a deleted take can be undone before the removal is final. */
+export const UNDO_MS = 5000;
+
+/** A take just removed, held briefly so the deletion can be undone. */
+export type PendingDelete = { recording: Recording; index: number };
+
 /**
  * Recording / playback engine for keyboard compositions. Capture taps the live
  * synth event stream (note on/off + preset) with millisecond timestamps; playback
@@ -20,6 +26,9 @@ export function useRecorder() {
   const [isRecording, setIsRecording] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+  // The most recent delete, kept for a short undo window (null = nothing to undo).
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recording scratch state.
   const t0Ref = useRef(0);
@@ -122,13 +131,42 @@ export function useRecorder() {
     setRecordings((list) => list.map((r) => (r.id === id ? { ...r, name: trimmed } : r)));
   }, []);
 
+  // Soft delete: drop the take from the list (and storage) immediately, but stash
+  // it for UNDO_MS so a misclick is recoverable. Only one undo slot — a second
+  // delete finalizes the previous one (it stays removed). The undo is in-memory
+  // ONLY: the take is already gone from localStorage, so closing the app during
+  // the window makes the deletion final.
   const remove = useCallback(
     (id: string) => {
+      const index = recordings.findIndex((r) => r.id === id);
+      if (index === -1) return;
+      const recording = recordings[index];
       if (playingId === id) stopPlayback();
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      setPendingDelete({ recording, index });
       setRecordings((list) => list.filter((r) => r.id !== id));
+      undoTimerRef.current = setTimeout(() => {
+        setPendingDelete(null);
+        undoTimerRef.current = null;
+      }, UNDO_MS);
     },
-    [playingId, stopPlayback],
+    [recordings, playingId, stopPlayback],
   );
+
+  const undoDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    const { recording, index } = pendingDelete;
+    setRecordings((list) => {
+      const next = [...list];
+      next.splice(Math.min(index, next.length), 0, recording); // restore at its old spot
+      return next;
+    });
+    setPendingDelete(null);
+  }, [pendingDelete]);
 
   // Clean up on unmount. clearPlayback (not a bare clearTimeout loop) so any notes
   // still sounding from an in-flight replay are released — otherwise unmounting
@@ -137,6 +175,7 @@ export function useRecorder() {
     return () => {
       clearPlayback();
       if (tickRef.current) clearInterval(tickRef.current);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
       setSynthSink(null);
     };
   }, [clearPlayback]);
@@ -146,11 +185,13 @@ export function useRecorder() {
     isRecording,
     playingId,
     elapsedMs,
+    pendingDelete,
     startRecording,
     stopRecording,
     play,
     stopPlayback,
     rename,
     remove,
+    undoDelete,
   };
 }

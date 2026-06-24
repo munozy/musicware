@@ -87,4 +87,46 @@ describe("Recorder UI", () => {
     act(() => vi.advanceTimersByTime(3100)); // past durationMs + end marker
     expect(screen.getByLabelText("Play Composition 1")).toBeDefined();
   });
+
+  it("shows an undo toast after delete and restores the take on Undo", () => {
+    saveRecordings([seed()]);
+    render(<Recorder />);
+
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(screen.queryByLabelText("Play Composition 1")).toBeNull(); // row gone
+    expect(screen.getByText(/Deleted/)).toBeDefined(); // toast shown
+
+    fireEvent.click(screen.getByRole("button", { name: /Undo delete/ }));
+    expect(screen.getByLabelText("Play Composition 1")).toBeDefined(); // restored
+    expect(screen.queryByText(/Deleted/)).toBeNull(); // toast gone
+  });
+
+  it("auto-dismisses the undo toast after the window, keeping the take deleted", () => {
+    vi.useFakeTimers();
+    saveRecordings([seed()]);
+    render(<Recorder />);
+
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(screen.getByText(/Deleted/)).toBeDefined();
+
+    act(() => vi.advanceTimersByTime(5001));
+    expect(screen.queryByText(/Deleted/)).toBeNull();
+    expect(screen.queryByLabelText("Play Composition 1")).toBeNull();
+  });
+
+  it("restores focus: to Undo after delete, to the name button after rename", () => {
+    saveRecordings([seed()]);
+    render(<Recorder />);
+
+    // Rename → on commit, focus returns to the name (Rename) button.
+    fireEvent.click(screen.getByLabelText("Rename Composition 1"));
+    act(() => {
+      fireEvent.keyDown(screen.getByLabelText("New name"), { key: "Enter" });
+    });
+    expect(document.activeElement).toBe(screen.getByLabelText("Rename Composition 1"));
+
+    // Delete → focus moves to the Undo control (not lost on the removed row).
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Undo delete/ }));
+  });
 });
