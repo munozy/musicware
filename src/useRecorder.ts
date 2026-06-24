@@ -130,14 +130,16 @@ export function useRecorder() {
     [playingId, stopPlayback],
   );
 
-  // Clean up timers on unmount.
+  // Clean up on unmount. clearPlayback (not a bare clearTimeout loop) so any notes
+  // still sounding from an in-flight replay are released — otherwise unmounting
+  // mid-playback (HMR, future in-app nav) strands voices in the audio engine.
   useEffect(() => {
     return () => {
+      clearPlayback();
       if (tickRef.current) clearInterval(tickRef.current);
-      for (const id of timeoutsRef.current) clearTimeout(id);
       setSynthSink(null);
     };
-  }, []);
+  }, [clearPlayback]);
 
   return {
     recordings,

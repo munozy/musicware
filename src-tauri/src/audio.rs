@@ -1169,9 +1169,11 @@ mod tests {
         let mut buf = [0.0f32; FRAMES * CHANNELS];
         let adsr_table = build_adsr_table(sr);
         let sounding_voices = AtomicUsize::new(0);
+        let volume = AtomicU32::new(DEFAULT_VOLUME.to_bits());
 
-        // Mirror the real callback for EVERY waveform: drain + render + publish,
-        // all under the no-alloc guard (additive's harmonic loop included).
+        // Mirror the real callback for EVERY waveform: drain + render + volume-limit
+        // + publish, all under the no-alloc guard (additive's harmonic loop AND the
+        // master-volume post-process included).
         assert_no_alloc(|| {
             while let Some(ev) = consumer.try_pop() {
                 apply_event(&mut pool, ev, sr, 1); // capture preset 1 (Organ)
@@ -1185,6 +1187,8 @@ mod tests {
                     wf,
                     &adsr_table,
                 );
+                let level = f32::from_bits(volume.load(Ordering::Relaxed));
+                apply_master_volume(&mut buf, level * VOLUME_GAIN_MAX);
             }
             sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
         });

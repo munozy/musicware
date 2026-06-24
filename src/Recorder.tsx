@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRecorder } from "./useRecorder";
 import { formatDuration, type Recording } from "./recordings";
 
@@ -76,19 +76,29 @@ function RecordingRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(rec.name);
+  // Enter fires commit AND then unmounting the input fires blur→commit; this guards
+  // against the resulting double onRename. Reset when (re)entering edit mode.
+  const committedRef = useRef(false);
 
   // Keep the draft in sync if the name changes from elsewhere while not editing.
   useEffect(() => {
     if (!editing) setDraft(rec.name);
   }, [rec.name, editing]);
 
+  const beginEdit = () => {
+    committedRef.current = false;
+    setEditing(true);
+  };
   const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
     setEditing(false);
     const next = draft.trim();
     if (next && next !== rec.name) onRename(next);
     else setDraft(rec.name);
   };
   const cancel = () => {
+    committedRef.current = true; // a following blur must not re-commit
     setDraft(rec.name);
     setEditing(false);
   };
@@ -123,7 +133,7 @@ function RecordingRow({
           className="rec-name"
           aria-label={`Rename ${rec.name}`}
           title="Click to rename"
-          onClick={() => setEditing(true)}
+          onClick={beginEdit}
         >
           {rec.name}
         </button>

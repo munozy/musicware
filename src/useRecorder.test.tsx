@@ -89,6 +89,22 @@ describe("useRecorder — capture", () => {
 
     expect(result.current.recordings).toHaveLength(0);
   });
+
+  it("ignores a second startRecording while already recording (no duplicate capture)", () => {
+    const { result } = renderHook(() => useRecorder());
+    act(() => result.current.startRecording());
+    act(() => result.current.startRecording()); // guarded no-op
+    setNow(100);
+    act(() => synth.noteOn(60));
+    setNow(200);
+    act(() => synth.noteOff(60));
+    setNow(300);
+    act(() => result.current.stopRecording());
+
+    expect(result.current.recordings).toHaveLength(1);
+    const ons = result.current.recordings[0].events.filter((e) => e.kind === "on");
+    expect(ons).toHaveLength(1); // one sink installed → no doubled events
+  });
 });
 
 describe("useRecorder — playback", () => {
@@ -137,6 +153,24 @@ describe("useRecorder — playback", () => {
 
     expect(calls()).toContainEqual(["note_off", { note: 67 }]);
     expect(result.current.playingId).toBeNull();
+  });
+
+  it("releases sounding notes when the hook unmounts mid-playback (no stranded voice)", () => {
+    const { result, unmount } = renderHook(() => useRecorder());
+    act(() => result.current.startRecording());
+    setNow(10);
+    act(() => synth.noteOn(67));
+    setNow(1000);
+    act(() => synth.noteOff(67));
+    act(() => result.current.stopRecording());
+    const id = result.current.recordings[0].id;
+
+    act(() => result.current.play(id));
+    act(() => vi.advanceTimersByTime(20)); // on(67) fired, off (t=1000) not yet
+    vi.mocked(invoke).mockClear();
+    act(() => unmount()); // e.g. HMR / navigation while a take is still playing
+
+    expect(calls()).toContainEqual(["note_off", { note: 67 }]);
   });
 });
 
