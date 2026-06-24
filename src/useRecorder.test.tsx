@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 import { invoke } from "@tauri-apps/api/core";
 
-import { useRecorder } from "./useRecorder";
+import { useRecorder, UNDO_MS } from "./useRecorder";
 import * as synth from "./synth";
 import { loadRecordings } from "./recordings";
 
@@ -219,5 +219,48 @@ describe("useRecorder — rename / delete / persistence", () => {
       "Composition 1",
       "Composition 2",
     ]);
+  });
+
+  it("restores a deleted take at its original position via undo", () => {
+    const { result } = renderHook(() => useRecorder());
+    seedTake(result);
+    seedTake(result); // [Composition 1, Composition 2]
+    const [aId, bId] = result.current.recordings.map((r) => r.id);
+
+    act(() => result.current.remove(aId)); // delete the first
+    expect(result.current.recordings.map((r) => r.id)).toEqual([bId]);
+    expect(result.current.pendingDelete?.recording.id).toBe(aId);
+
+    act(() => result.current.undoDelete());
+    expect(result.current.recordings.map((r) => r.id)).toEqual([aId, bId]); // back at index 0
+    expect(result.current.pendingDelete).toBeNull();
+  });
+
+  it("finalizes the delete after the undo window (UNDO_MS)", () => {
+    const { result } = renderHook(() => useRecorder());
+    const id = seedTake(result);
+    act(() => result.current.remove(id));
+    expect(result.current.pendingDelete?.recording.id).toBe(id);
+
+    act(() => vi.advanceTimersByTime(UNDO_MS + 10));
+    expect(result.current.pendingDelete).toBeNull();
+    expect(result.current.recordings).toHaveLength(0);
+    expect(loadRecordings()).toHaveLength(0);
+  });
+
+  it("keeps a single undo slot — a second delete finalizes the first", () => {
+    const { result } = renderHook(() => useRecorder());
+    seedTake(result);
+    seedTake(result);
+    const [aId, bId] = result.current.recordings.map((r) => r.id);
+
+    act(() => result.current.remove(aId));
+    act(() => result.current.remove(bId)); // finalizes a, b is now pending
+    expect(result.current.pendingDelete?.recording.id).toBe(bId);
+
+    act(() => result.current.undoDelete()); // only b returns
+    const ids = result.current.recordings.map((r) => r.id);
+    expect(ids).toContain(bId);
+    expect(ids).not.toContain(aId);
   });
 });

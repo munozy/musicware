@@ -422,6 +422,27 @@ button {
   color: #d11;
 }
 
+.rec-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #2f2f2f;
+  color: #f6f6f6;
+  font-size: 0.85rem;
+}
+
+.rec-undo {
+  box-shadow: none;
+  padding: 0.2em 0.8em;
+  background: transparent;
+  color: #7db1ff;
+  border-color: #7db1ff;
+  font-weight: 600;
+}
+
 @media (prefers-color-scheme: dark) {
   .rec-row {
     background: #0f0f0f98;
