@@ -624,7 +624,9 @@ kbd {
   z-index: 1;
 }
 
-.key.white:active,
+/* Highlight is driven ONLY by `.held` (the actually-sounding note), NOT by
+   `:active` — `:active` sticks to the key where the press started for the whole
+   drag, which would leave the first key lit through a glissando. */
 .key.white.held {
   background: linear-gradient(180deg, #cfe0ff, #9bc0ff);
   box-shadow: 0 0 18px rgba(79, 134, 247, 0.7);
@@ -648,7 +650,6 @@ kbd {
   z-index: 2;
 }
 
-.key.black:active,
 .key.black.held {
   background: linear-gradient(180deg, #6aa0ff, #3f72e0);
   box-shadow: 0 0 16px rgba(79, 134, 247, 0.8);

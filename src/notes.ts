@@ -16,3 +16,14 @@ export function pitchClass(n: number): number {
 export function noteLabel(n: number): string {
   return `${NOTE_NAMES[pitchClass(n)]}${Math.floor(n / 12) - 1}`;
 }
+
+// Drum-kit names by pitch class — must match `drum_params` in src-tauri/src/audio.rs
+// (the Drums preset maps note % 12 → a drum). Used to label the UI in Drums mode
+// so a "kick" reads as Kick, not "C".
+export const DRUM_NAMES = [
+  "Kick", "Rim", "Snare", "Clap", "Tom", "Tom", "Hi-hat", "Tom", "Open hat", "Crash", "Cowbell", "Ride",
+];
+
+export function drumName(n: number): string {
+  return DRUM_NAMES[pitchClass(n)];
+}

@@ -43,6 +43,7 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Theremin** — A preset: a warm near-sine voiced with **vibrato** + a soft swell envelope (slow attack/release, no percussive onset) for the instrument's eerie wavering tone (ADR-0006).
 - **Vibrato** — A gentle periodic **pitch** wobble from a low-frequency oscillator (LFO). The Theremin's signature: ~5.5 Hz, ±~0.5 semitone, applied per-sample as a phase modulation. (Distinct from tremolo, which modulates *amplitude*.)
 - **LFO (low-frequency oscillator)** — A sub-audio oscillator used to *modulate* another parameter rather than be heard directly (here, the vibrato pitch wobble). Per-voice, precomputed rate.
+- **Glissando** — Playing by holding the pointer down and sliding across keys: each key the cursor enters sounds and releases as the cursor leaves it (driven by pointer enter/leave with the primary button held).
 - **Recording** — A saved take: a named, timestamped stream of the UI's note/preset events, captured at the synth dispatch choke point and persisted to `localStorage` (ADR-0002). Symbolic events, **not** audio.
 - **Take** — One captured performance from record-start to stop — the unit a Recording holds. Held notes are auto-closed at stop so a take is self-contained; an empty take (no note-ons) is discarded.
 - **Replay** — Playing back a Recording by re-dispatching its events to the engine on a schedule (ADR-0002). Uses the same dispatch path as live play, so it sounds the same and lights the same keys.
