@@ -137,6 +137,10 @@ pub enum Waveform {
     Organ,
     EPiano,
     Bell,
+    /// A percussion kit: the note's pitch class selects a drum (kick, snare, hat,
+    /// tom…). Unpitched/noise-based and stateful, so it is synthesised in
+    /// `render_block`'s drum branch, NOT via `eval_waveform`.
+    Drums,
 }
 
 /// Organ registration — Hammond drawbar-style: fundamental, octaves (k2,k4,k8)
@@ -216,6 +220,87 @@ fn eval_waveform(kind: Waveform, phase: f32) -> f32 {
         Waveform::Organ => additive_sum(phase, &ORGAN_HARMONICS, ORGAN_NORM),
         Waveform::EPiano => additive_sum(phase, &EPIANO_HARMONICS, EPIANO_NORM),
         Waveform::Bell => bell_at(phase),
+        // Drums are noise/stateful and rendered in `render_block`'s drum branch;
+        // they never reach this pure single-phase path. 0.0 keeps it total.
+        Waveform::Drums => 0.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drums (percussion kit) — the note's pitch class picks a drum. Unpitched noise
+// + pitch-swept sines, each with its own decay. Bounded to [-1, 1] by
+// construction (every mix sums to ≤ 1) and alloc-free (xorshift noise + sines),
+// so the headroom proof and RT-safety hold.
+// ---------------------------------------------------------------------------
+
+/// Per-drum parameters for pitch class `note % 12`:
+/// (amp-decay τ secs, tone start Hz, tone end Hz, pitch-sweep τ secs).
+/// A 0 start-Hz means a pure-noise drum (no tone). end==start means no sweep.
+fn drum_params(cls: usize) -> (f32, f32, f32, f32) {
+    match cls {
+        0 => (0.09, 180.0, 50.0, 0.018), // C  kick — fast, deep pitch drop = thump
+        1 => (0.006, 0.0, 0.0, 0.0),     // C# rim/stick — very short bright click
+        2 => (0.11, 190.0, 150.0, 0.06), // D  snare — body tone (drops) + bright wires
+        3 => (0.05, 0.0, 0.0, 0.0),      // D# clap — short bright noise
+        4 => (0.20, 120.0, 88.0, 0.07),  // E  tom low — sine with a pitch drop
+        5 => (0.17, 165.0, 120.0, 0.07), // F  tom mid
+        6 => (0.04, 0.0, 0.0, 0.0),      // F# closed hat — short bright noise
+        7 => (0.14, 220.0, 165.0, 0.06), // G  tom high
+        8 => (0.22, 0.0, 0.0, 0.0),      // G# open hat — medium bright noise
+        9 => (0.55, 0.0, 0.0, 0.0),      // A  crash — long bright noise wash
+        10 => (0.18, 540.0, 540.0, 0.0), // A# cowbell — square tone
+        _ => (0.30, 520.0, 520.0, 0.0),  // B  ride — bright wash + a tonal ping
+    }
+}
+
+/// One white-noise sample in [-1, 1) via an in-place xorshift32 (alloc-free,
+/// deterministic per seed). `state` must be non-zero.
+fn drum_noise(state: &mut u32) -> f32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+}
+
+/// Bright (high-passed) noise: the first difference of white noise emphasises the
+/// top end, turning a muddy "shhh" into a crisp metallic "tss" — the character of
+/// hats/cymbals/snare-wires. `prev` carries the previous sample; clamped to [-1,1].
+fn bright_noise(rng: &mut u32, prev: &mut f32) -> f32 {
+    let x = drum_noise(rng);
+    let hp = (x - *prev).clamp(-1.0, 1.0);
+    *prev = x;
+    hp
+}
+
+/// Advance `phase` by `inc` radians/sample and return the sine — the tonal
+/// component of pitched drums (`inc` is precomputed at note-on, so no `sr` here).
+fn drum_tone(phase: &mut f32, inc: f32) -> f32 {
+    *phase += inc;
+    while *phase >= TWO_PI {
+        *phase -= TWO_PI;
+    }
+    phase.sin()
+}
+
+/// The raw drum source for pitch class `cls` in [-1, 1] (pre-amplitude-envelope).
+/// `freq_inc` is the current tone increment (radians/sample); `phase`/`rng`/`filt`
+/// are the voice's tone phase, noise state and high-pass memory.
+fn drum_source(cls: usize, phase: &mut f32, freq_inc: f32, rng: &mut u32, filt: &mut f32) -> f32 {
+    match cls {
+        0 | 4 | 5 | 7 => drum_tone(phase, freq_inc), // kick / toms — pitch-swept sine
+        2 => 0.45 * drum_tone(phase, freq_inc) + 0.55 * bright_noise(rng, filt), // snare: body + wires
+        10 => {
+            // cowbell — squared sine for a hollow metallic tone
+            if drum_tone(phase, freq_inc) >= 0.0 {
+                0.7
+            } else {
+                -0.7
+            }
+        }
+        11 => 0.4 * drum_tone(phase, freq_inc) + 0.55 * bright_noise(rng, filt), // ride: ping + wash
+        _ => bright_noise(rng, filt), // rim / clap / hats / crash — bright noise
     }
 }
 
@@ -253,7 +338,7 @@ struct Preset {
     adsr: AdsrSpec,
 }
 
-pub const PRESET_COUNT: usize = 4;
+pub const PRESET_COUNT: usize = 5;
 
 /// The selectable presets.  Index 0 (Sine) reproduces the pre-K4 sound exactly.
 static PRESETS: [Preset; PRESET_COUNT] = [
@@ -303,6 +388,20 @@ static PRESETS: [Preset; PRESET_COUNT] = [
             sustain: 0.0,
             release_secs: 0.400, // a softer damper than the piano
             shape: EnvShape::Exponential,
+        },
+    },
+    // 4: "Drums" — a percussion kit. The note picks the drum; the amplitude shape
+    // and decay are baked per-drum (Voice::drum_amp), so this envelope is just a
+    // 2 ms declick attack that then holds (sustain 1) — it never caps the drum's
+    // own decay or frees the voice (the drum branch does that at its amp floor).
+    Preset {
+        waveform: Waveform::Drums,
+        adsr: AdsrSpec {
+            attack_secs: 0.0006, // a near-instant onset — the percussive transient/snap
+            decay_secs: 0.050,
+            sustain: 1.0,
+            release_secs: 0.010,
+            shape: EnvShape::Linear,
         },
     },
 ];
@@ -371,6 +470,19 @@ struct Voice {
     // (gain 1, decay 1) for non-bell voices.
     bell_gain: [f32; BELL_PARTIALS],
     bell_decay: [f32; BELL_PARTIALS],
+    // Drums state (inert for other waveforms). The note's pitch class picks the
+    // drum at note-on; `drum_amp` is the baked amplitude envelope (1→0) that
+    // multiplies the source and frees the voice at its floor; `drum_freq` is the
+    // tone increment in radians/sample, swept toward `drum_freq_end` (the kick's
+    // pitch drop) by `drum_freq_mult`. All precomputed at note-on (no `sr` in the
+    // render path). `noise_state` is the xorshift PRNG (must stay non-zero).
+    noise_state: u32,
+    drum_amp: f32,
+    drum_amp_mult: f32,
+    drum_freq: f32,
+    drum_freq_end: f32,
+    drum_freq_mult: f32,
+    drum_filt: f32, // previous noise sample — for the bright (high-pass) noise of hats/snare
 }
 
 impl Voice {
@@ -385,6 +497,13 @@ impl Voice {
         bell_phases: [0.0; BELL_PARTIALS],
         bell_gain: [1.0; BELL_PARTIALS],
         bell_decay: [1.0; BELL_PARTIALS],
+        noise_state: 1,
+        drum_amp: 0.0,
+        drum_amp_mult: 1.0,
+        drum_freq: 0.0,
+        drum_freq_end: 0.0,
+        drum_freq_mult: 1.0,
+        drum_filt: 0.0,
     };
 
     /// Is this voice contributing sound (anything but fully released)?
@@ -578,6 +697,30 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32, current_pr
                     v.bell_decay[p] = (-LN_1000 * extra_rate / sample_rate.max(1.0)).exp();
                 }
             }
+            // For a Drums hit, pick the drum from the pitch class and precompute its
+            // per-sample amplitude decay + tone increment/sweep (radians/sample, so
+            // the render path needs no sample rate). Reset phase + seed the noise.
+            if PRESETS[current_preset as usize].waveform == Waveform::Drums {
+                let sr = sample_rate.max(1.0);
+                let (tau, f_start, f_end, sweep_tau) = drum_params((note % 12) as usize);
+                let two_pi_over_sr = TWO_PI / sr;
+                v.phase = 0.0;
+                v.phase_delta = 0.0; // drums advance their tone phase via drum_freq
+                v.drum_amp = 1.0;
+                v.drum_amp_mult = (-1.0 / (tau * sr)).exp();
+                v.drum_freq = f_start * two_pi_over_sr;
+                v.drum_freq_end = f_end * two_pi_over_sr;
+                v.drum_freq_mult = if sweep_tau > 0.0 {
+                    (-1.0 / (sweep_tau * sr)).exp()
+                } else {
+                    1.0
+                };
+                v.drum_filt = 0.0;
+                // Seed the PRNG distinctly per hit (must be non-zero).
+                v.noise_state = (note as u32).wrapping_mul(2_654_435_761)
+                    ^ (age as u32).wrapping_mul(40_503)
+                    | 1;
+            }
             // bell_phases are NOT reset: leaving them continuous avoids a click on a
             // bell re-strike; from silence the attack ramps from env 0 anyway.
             // Neither phase nor env is reset: both stay continuous so retriggering
@@ -590,6 +733,12 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32, current_pr
             // Skipping voices already in Release means a duplicate/late off doesn't
             // re-release a tail.  No match → no-op (e.g. key-up after a steal).
             for v in pool.voices.iter_mut() {
+                // Drums are one-shots: ignore note-off so a quick tap rings out its
+                // full baked decay instead of choking; the drum branch frees the
+                // voice at its amplitude floor.
+                if PRESETS[v.preset as usize].waveform == Waveform::Drums {
+                    continue;
+                }
                 if v.is_sounding() && v.stage != EnvStage::Release && v.note == note {
                     v.stage = EnvStage::Release;
                 }
@@ -623,11 +772,37 @@ fn render_block(
         for v in voices.iter_mut() {
             if v.is_sounding() {
                 let env = step_env(v, &adsr_table[v.preset as usize]);
-                // Bell sums INHARMONIC partials, each on its own phase accumulator so
-                // a non-integer ratio causes no 2π-wrap discontinuity; bounded to
-                // [-1,1] by /BELL_NORM. Every other waveform takes the unchanged
-                // single-phase `eval_waveform` path (byte-identical).
-                let s = if waveform == Waveform::Bell {
+                // Drums are dispatched per-VOICE (by the preset it was struck with),
+                // not by the live block waveform — a one-shot drum must keep decaying
+                // and self-free even if the user switches to another preset mid-tail
+                // (otherwise its branch is skipped and, with sustain 1 + note-off
+                // ignored, the voice strands and leaks a DC term). Bell + tonal
+                // waveforms stay GLOBAL (held notes re-timbre live, STORY-K4).
+                let voice_is_drum = PRESETS[v.preset as usize].waveform == Waveform::Drums;
+                let s = if voice_is_drum {
+                    // Drum source (∈[-1,1]) shaped by the baked amplitude env; the env
+                    // decays and, at its floor, frees the voice (drums ignore note-off).
+                    let cls = (v.note % 12) as usize;
+                    let src = drum_source(
+                        cls,
+                        &mut v.phase,
+                        v.drum_freq,
+                        &mut v.noise_state,
+                        &mut v.drum_filt,
+                    );
+                    let out = src * v.drum_amp;
+                    v.drum_amp *= v.drum_amp_mult;
+                    v.drum_freq =
+                        v.drum_freq_end + (v.drum_freq - v.drum_freq_end) * v.drum_freq_mult;
+                    if v.drum_amp <= ENV_FLOOR {
+                        v.env = 0.0;
+                        v.stage = EnvStage::Idle;
+                    }
+                    out
+                } else if waveform == Waveform::Bell {
+                    // Bell sums INHARMONIC partials, each on its own phase accumulator
+                    // so a non-integer ratio causes no 2π-wrap discontinuity; bounded
+                    // to [-1,1] by /BELL_NORM.
                     let mut acc = 0.0f32;
                     for p in 0..BELL_PARTIALS {
                         // Each partial's amplitude is its registration weight scaled by
@@ -1823,6 +1998,196 @@ mod tests {
         assert!(
             max_shape_diff > 0.1,
             "Organ and Piano must render spectrally-distinct shapes (max normalised diff {max_shape_diff})"
+        );
+    }
+
+    // --- Drums (percussion kit) ---------------------------------------------
+
+    const DRUMS: u8 = 4; // PRESETS index of the Drums kit
+
+    /// A full pool of drum hits (one per pitch class) renders within [-1, 1] — the
+    /// headroom proof holds for the kit (every drum source ∈ [-1,1], amp env ≤ 1).
+    #[test]
+    fn drums_render_is_bounded() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        for note in 60u8..72 {
+            apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
+        }
+        let mut buf = [0.0f32; 2048];
+        for _ in 0..8 {
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Drums,
+                &table,
+            );
+            for &s in buf.iter() {
+                assert!((-1.0..=1.0).contains(&s), "drum mix out of range: {s}");
+            }
+        }
+    }
+
+    /// A short drum (closed hat, small τ) frees its voice once its baked amplitude
+    /// envelope hits the floor — drums are one-shots that self-free.
+    #[test]
+    fn drum_voice_self_frees_at_amp_floor() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 61 }, sr, DRUMS); // C# rim (shortest τ)
+        assert_eq!(pool.sounding_count(), 1);
+        let mut buf = [0.0f32; 4096]; // ~93 ms — past the rim's ~55 ms decay-to-floor
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Drums,
+            &table,
+        );
+        assert_eq!(
+            pool.sounding_count(),
+            0,
+            "a rim voice should have self-freed after its short decay"
+        );
+    }
+
+    /// Drums ignore note-off (one-shot): a key-up must NOT choke the hit into Release.
+    #[test]
+    fn drums_ignore_note_off() {
+        let sr = 44_100.0;
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 60 }, sr, DRUMS); // kick
+        apply_event(&mut pool, NoteEvent::NoteOff { note: 60 }, sr, DRUMS);
+        let v = pool.voices.iter().find(|v| v.note == 60).unwrap();
+        assert!(
+            v.is_sounding(),
+            "drum hit should keep sounding after note-off"
+        );
+        assert_ne!(
+            v.stage,
+            EnvStage::Release,
+            "drum note-off must not trigger Release"
+        );
+    }
+
+    /// Different keys are different drums: a kick (C, tonal low) and a snare
+    /// (D, noisy) render audibly different output.
+    #[test]
+    fn drums_kick_and_snare_differ() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let render = |note: u8| {
+            let mut pool = VoicePool::new();
+            apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
+            let mut buf = [0.0f32; 1024];
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Drums,
+                &table,
+            );
+            buf
+        };
+        let kick = render(60); // C  → pitch-swept sine
+        let snare = render(62); // D → noise + tone
+        let diff: f32 = kick
+            .iter()
+            .zip(snare.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff > 1.0,
+            "kick and snare should render differently (Σ|Δ| = {diff})"
+        );
+    }
+
+    /// The drum render path is allocation-free (xorshift noise + sines, no heap) —
+    /// across ALL 12 pitch classes (every `drum_source` arm: tones, snare/ride
+    /// tone+noise mix, cowbell square, bright-noise hats/crash/clap/rim).
+    #[test]
+    fn drum_render_does_not_allocate() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        for note in 60u8..72 {
+            apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
+        }
+        let mut buf = [0.0f32; 512];
+        assert_no_alloc(|| {
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Drums,
+                &table,
+            );
+        });
+    }
+
+    /// Regression for the zombie-voice defect: a struck drum must keep decaying and
+    /// self-free even when the live block waveform is no longer Drums (user switched
+    /// preset mid-tail). Drums dispatch per-voice (by captured preset), so the voice
+    /// must still reach Idle and not strand a slot / leak a DC term.
+    #[test]
+    fn drum_voice_frees_after_preset_switch() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 61 }, sr, DRUMS); // rim (short τ)
+        assert_eq!(pool.sounding_count(), 1);
+        // Render with a NON-Drums live waveform (as if the user switched to Saw).
+        let mut buf = [0.0f32; 4096];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Saw,
+            &table,
+        );
+        assert_eq!(
+            pool.sounding_count(),
+            0,
+            "a drum voice must self-free even after a preset switch (no stranded slot / DC)"
+        );
+    }
+
+    /// Bright-noise drums (hats) are high-frequency-dominant — guards against a
+    /// future "tidy" silently dropping the high-pass that fixed the by-ear rejection.
+    /// A bright hat flips sign far more often than a low pitched drum (kick).
+    #[test]
+    fn drum_hat_is_brighter_than_kick() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let sign_changes = |note: u8| {
+            let mut pool = VoicePool::new();
+            apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
+            let mut buf = [0.0f32; 1024];
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Drums,
+                &table,
+            );
+            buf.windows(2)
+                .filter(|w| w[0].signum() != w[1].signum())
+                .count()
+        };
+        let hat = sign_changes(66); // F# closed hat (bright noise)
+        let kick = sign_changes(60); // C kick (low sine)
+        assert!(
+            hat > kick * 5,
+            "hat should be far brighter (more sign changes) than kick — hat={hat}, kick={kick}"
         );
     }
 
