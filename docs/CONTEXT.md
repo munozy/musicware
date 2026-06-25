@@ -66,6 +66,12 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Bus / Send** *(later)* — A bus sums several tracks for shared processing; a send routes a portion of a track to a bus (e.g. a shared reverb). Reserved in the data model, inert in V1.
 - **Automation lane** *(later)* — A per-track, per-parameter curve over time (volume, pan, filter cutoff, reverb/delay amount, any future parameter) drawn under a track. Reserved in the data model, inert in V1.
 
+> Discovery distinctions (from [DISCOVERY-001](product/discovery/DISCOVERY-001-arrangement-value-usability.md)) — the behavioural categories OQ-1/OQ-2 turn on; they decide whether the multi-track workspace (Solution A) is built at all.
+
+- **Deliberate part** — A Take recorded with the explicit intent that it will be combined with other Takes to form a multi-section song. The OQ-1 "yes" case; the unit a multi-track arrangement assembles. Distinct from a self-contained performance.
+- **Self-contained performance** — A Take that is complete on its own terms (a full improvisation or finished idea), not recorded as part of a larger song plan. The OQ-1 "no" case and Solution B's natural unit (one longer Take + section markers, no timeline).
+- **Cross-session intent** — Returning in a later session to a Take recorded earlier, intending to build on or combine it. The OQ-2 signal; absent it, the arrangement workspace solves a workflow that doesn't yet exist in the user's practice.
+
 ## Architecture terms
 
 > Per [ADR-0001](architecture/decisions/ADR-0001-react-tauri-rust-audio-engine.md): React+TS UI in **Tauri (v2)**, **Rust** audio engine. No Python.
