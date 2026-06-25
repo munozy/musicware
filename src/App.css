@@ -694,3 +694,318 @@ kbd {
   font-size: 0.78rem;
   margin: 0;
 }
+
+/* ---- Mode toggle -------------------------------------------------- */
+
+.mode-toggle {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.mode-toggle-btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.38em 1em;
+  background: transparent;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-toggle-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.mode-toggle-btn.selected {
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(79, 134, 247, 0.35);
+}
+
+.mode-toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Song view ---------------------------------------------------- */
+
+.song-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.song-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.song-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.song-interstitial {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+.song-go-record-btn {
+  padding: 0.55em 1.4em;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent-2);
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.song-go-record-btn:hover {
+  background: rgba(79, 134, 247, 0.15);
+}
+
+/* ---- Song transport ---------------------------------------------- */
+
+.song-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.song-transport-btn {
+  width: 2.2em;
+  height: 2.2em;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-strong);
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.song-transport-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.song-transport-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.song-transport-status {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* ---- Clip shelf --------------------------------------------------- */
+
+.clip-shelf {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clip-shelf-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+}
+
+.clip-shelf-empty {
+  color: var(--text-dim);
+  font-size: 0.83rem;
+}
+
+.clip-shelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.clip-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 7px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  background: var(--panel-strong);
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.15s;
+}
+
+.clip-card:hover {
+  border-color: var(--accent);
+}
+
+.clip-card:active {
+  cursor: grabbing;
+}
+
+.clip-card-name {
+  font-size: 0.83rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-card-dur {
+  font-size: 0.73rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* ---- Timeline ---------------------------------------------------- */
+
+.timeline {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  position: relative;
+}
+
+.timeline-ruler {
+  height: 24px;
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.ruler-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 3px;
+}
+
+.ruler-tick::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 8px;
+  background: var(--border);
+}
+
+.ruler-label {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  padding-left: 3px;
+}
+
+.timeline-tracks {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-track-row {
+  display: flex;
+  height: 64px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-track-label {
+  width: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+  border-right: 1px solid var(--border);
+  opacity: 0.85;
+}
+
+.timeline-lane {
+  flex: 1;
+  position: relative;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.1s;
+}
+
+.timeline-lane:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.timeline-clip {
+  position: absolute;
+  top: 6px;
+  height: calc(100% - 12px);
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  overflow: hidden;
+  min-width: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.timeline-clip-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--rec);
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.timeline-playhead.playing {
+  opacity: 1;
+}

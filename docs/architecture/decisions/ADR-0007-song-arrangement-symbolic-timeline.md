@@ -3,8 +3,8 @@
 > Owner: Architecture (`moonozy-architect`). Format: Michael Nygard. **ADRs are immutable** — never rewrite an
 > accepted ADR; supersede it with a new one and set this one's Status to "Superseded by ADR-000M".
 
-- **Status:** Proposed
-- **Date:** 2026-06-25
+- **Status:** Accepted (2026-06-26) — KA-1 feasibility gate PASSED (`src/arrangement.ts` merged on main) + DISCOVERY-001 OQ-3 usability gate PASSED (Gate A; n=1 owner-self-administered caveat carried). Decision content unchanged on acceptance.
+- **Date:** 2026-06-25 (proposed) · 2026-06-26 (accepted)
 - **Deciders:** Architecture (`moonozy-architect`) + developer (munozy)
 
 ## Context

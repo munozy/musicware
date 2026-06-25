@@ -1,5 +1,5 @@
 import "./App.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Keyboard from "./Keyboard";
 import PresetSelector from "./PresetSelector";
 import VolumeControl from "./VolumeControl";
@@ -8,6 +8,8 @@ import VizStyleSelector from "./VizStyleSelector";
 import ChordDisplay from "./ChordDisplay";
 import Transport from "./Transport";
 import Library from "./Library";
+import ModeToggle, { type AppMode } from "./ModeToggle";
+import SongView from "./SongView";
 import { useRecorder } from "./useRecorder";
 import { useVisualizerStyle } from "./useVisualizerStyle";
 
@@ -15,6 +17,7 @@ function App() {
   const rec = useRecorder();
   const [vizStyle, setVizStyle] = useVisualizerStyle();
   const recordBtnRef = useRef<HTMLButtonElement>(null);
+  const [mode, setMode] = useState<AppMode>("play");
 
   // R toggles record/stop (ignored while typing in a field). Keep the latest
   // toggle in a ref so the listener binds once.
@@ -43,6 +46,11 @@ function App() {
           <span className="brand-dot" aria-hidden="true" />
           musicware
         </div>
+        <ModeToggle
+          mode={mode}
+          onChange={setMode}
+          isRecording={rec.isRecording}
+        />
         <Transport
           recordBtnRef={recordBtnRef}
           isRecording={rec.isRecording}
@@ -54,35 +62,46 @@ function App() {
         <VolumeControl />
       </header>
 
-      <div className="body">
-        <Library
-          recordings={rec.recordings}
-          playingId={rec.playingId}
-          playProgress={rec.playProgress}
-          pendingDelete={rec.pendingDelete}
-          onPlay={rec.play}
-          onStopPlay={rec.stopPlayback}
-          onRename={rec.rename}
-          onDelete={rec.remove}
-          onUndo={rec.undoDelete}
-          recordBtnRef={recordBtnRef}
-        />
+      {mode === "play" ? (
+        <>
+          <div className="body">
+            <Library
+              recordings={rec.recordings}
+              playingId={rec.playingId}
+              playProgress={rec.playProgress}
+              pendingDelete={rec.pendingDelete}
+              onPlay={rec.play}
+              onStopPlay={rec.stopPlayback}
+              onRename={rec.rename}
+              onDelete={rec.remove}
+              onUndo={rec.undoDelete}
+              recordBtnRef={recordBtnRef}
+            />
 
-        <main className="stage">
-          <div className="viz-panel">
-            <Visualizer style={vizStyle} />
-            <VizStyleSelector value={vizStyle} onChange={setVizStyle} />
+            <main className="stage">
+              <div className="viz-panel">
+                <Visualizer style={vizStyle} />
+                <VizStyleSelector value={vizStyle} onChange={setVizStyle} />
+              </div>
+              <ChordDisplay />
+              <div className="stage-controls">
+                <PresetSelector />
+              </div>
+            </main>
           </div>
-          <ChordDisplay />
-          <div className="stage-controls">
-            <PresetSelector />
-          </div>
+
+          <footer className="dock">
+            <Keyboard />
+          </footer>
+        </>
+      ) : (
+        <main className="song-main">
+          <SongView
+            recordings={rec.recordings}
+            onGoToPlay={() => setMode("play")}
+          />
         </main>
-      </div>
-
-      <footer className="dock">
-        <Keyboard />
-      </footer>
+      )}
     </div>
   );
 }
