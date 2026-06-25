@@ -186,3 +186,125 @@ describe("keyboard highlights replay in sync", () => {
     expect(keyC.className).not.toContain("held");
   });
 });
+
+// Recorder UI now lives in the Transport (top bar) + Library (sidebar) wired to
+// App's single useRecorder — so these are exercised at the App level.
+describe("recorder UI (Transport + Library)", () => {
+  const seed = (over = {}) => ({
+    id: "r1",
+    name: "Composition 1",
+    createdAt: 0,
+    durationMs: 3000,
+    events: [
+      { t: 0, kind: "preset" as const, index: 0 },
+      { t: 0, kind: "on" as const, note: 60 },
+      { t: 1000, kind: "off" as const, note: 60 },
+    ],
+    ...over,
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(invoke).mockClear();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the empty state when there are no takes", () => {
+    render(<App />);
+    expect(screen.getByText(/No takes yet/i)).toBeDefined();
+  });
+
+  it("toggles the record button between Record and Stop recording", () => {
+    render(<App />);
+    const rec = screen.getByLabelText("Record");
+    expect(rec.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(rec);
+    expect(screen.getByLabelText("Stop recording").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("lists a saved take in the sidebar with duration and controls", () => {
+    saveRecordings([seed()]);
+    render(<App />);
+    expect(screen.getByLabelText("Play Composition 1")).toBeDefined();
+    expect(screen.getByLabelText("Delete Composition 1")).toBeDefined();
+    expect(screen.getByText("0:03")).toBeDefined();
+  });
+
+  it("renames a take inline", () => {
+    saveRecordings([seed()]);
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Rename Composition 1"));
+    const input = screen.getByLabelText("New name") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Intro" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("Intro")).toBeDefined();
+  });
+
+  it("shows an undo toast after delete and restores on Undo", () => {
+    saveRecordings([seed()]);
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(screen.queryByLabelText("Play Composition 1")).toBeNull();
+    expect(screen.getByText(/Deleted/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Undo delete/ }));
+    expect(screen.getByLabelText("Play Composition 1")).toBeDefined();
+    expect(screen.queryByText(/Deleted/)).toBeNull();
+  });
+
+  it("auto-dismisses the undo toast, keeping the take deleted", () => {
+    vi.useFakeTimers();
+    saveRecordings([seed()]);
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(screen.getByText(/Deleted/)).toBeDefined();
+    act(() => vi.advanceTimersByTime(5001));
+    expect(screen.queryByText(/Deleted/)).toBeNull();
+    expect(screen.queryByLabelText("Play Composition 1")).toBeNull();
+  });
+
+  it("restores focus: to Undo after delete, to the name button after rename", () => {
+    saveRecordings([seed()]);
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Rename Composition 1"));
+    act(() => {
+      fireEvent.keyDown(screen.getByLabelText("New name"), { key: "Enter" });
+    });
+    expect(document.activeElement).toBe(screen.getByLabelText("Rename Composition 1"));
+
+    fireEvent.click(screen.getByLabelText("Delete Composition 1"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Undo delete/ }));
+  });
+});
+
+describe("record shortcut (R)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(invoke).mockClear();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("toggles record/stop on R", () => {
+    render(<App />);
+    expect(screen.getByLabelText("Record")).toBeDefined();
+
+    fireEvent.keyDown(window, { key: "r" });
+    expect(screen.getByLabelText("Stop recording")).toBeDefined();
+
+    fireEvent.keyDown(window, { key: "r" });
+    expect(screen.getByLabelText("Record")).toBeDefined();
+  });
+
+  it("ignores R while typing in a field (so rename can contain 'r')", () => {
+    saveRecordings([
+      { id: "r1", name: "Composition 1", createdAt: 0, durationMs: 1000, events: [] },
+    ]);
+    render(<App />);
+    fireEvent.click(screen.getByLabelText("Rename Composition 1"));
+    const input = screen.getByLabelText("New name") as HTMLInputElement;
+    input.focus();
+
+    fireEvent.keyDown(window, { key: "r" });
+    expect(screen.queryByLabelText("Stop recording")).toBeNull(); // did NOT start recording
+  });
+});
