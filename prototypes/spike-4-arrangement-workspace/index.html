@@ -1,0 +1,2648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Brick Stack — Arrangement Workspace Prototype (POC-004 / DISCOVERY-001 OQ-3)</title>
+<style>
+/* ── DESIGN TOKENS (dark-glass studio) ───────────────────────── */
+:root {
+  --bg-0: #0e0f13;
+  --bg-1: #13151c;
+  --panel: rgba(255,255,255,.04);
+  --panel-border: rgba(255,255,255,.10);
+  --accent: #7c5cff;
+  --accent-dim: rgba(124,92,255,.25);
+  --text-primary: #e8e9ef;
+  --text-muted: rgba(232,233,239,.55);
+  --text-faint: rgba(232,233,239,.3);
+
+  /* Per-brick accent hues */
+  --drums-hue: #e0a23b;
+  --bass-hue:  #1fa8a0;
+  --melody-hue:#9b7cff;
+  --chords-hue:#e06a8b;
+  --arp-hue:   #3ec9d6;
+
+  /* Per-row accent hues (finding #11) */
+  --row0-accent: #7c5cff;   /* violet */
+  --row1-accent: #1fa8a0;   /* teal   */
+  --row2-accent: #e06a8b;   /* rose   */
+
+  --playhead: #ff3b3b;
+  --gold: #f5c842;
+  --gold-glow: rgba(245,200,66,.22);
+  --refuse-orange: #ff7b35;
+  --refuse-orange-dim: rgba(255,123,53,.18);
+
+  --transport-h: 64px;
+  --tray-h: 136px;
+  --lane-h: 80px;
+  --lane-header-w: 128px;
+
+  --col-width: 96px;
+  --num-cols: 10;
+}
+
+@media (prefers-color-scheme: light) {
+  /* keep dark glass regardless — it IS the design */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg-0);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif;
+  height: 100%; overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── LAYOUT ───────────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 600px;
+}
+
+/* ── TRANSPORT STRIP ──────────────────────────────────────────── */
+#transport {
+  flex: 0 0 var(--transport-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--panel-border);
+  position: relative;
+  z-index: 30;
+}
+
+#btn-rewind {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  color: var(--text-primary);
+  font-size: 18px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: background .15s;
+  flex: 0 0 44px;
+}
+#btn-rewind:hover, #btn-rewind:focus-visible {
+  background: rgba(255,255,255,.09);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#btn-play {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  box-shadow: 0 0 20px rgba(124,92,255,.4);
+  transition: transform .1s, box-shadow .15s;
+  flex: 0 0 56px;
+}
+#btn-play:hover { transform: scale(1.06); box-shadow: 0 0 28px rgba(124,92,255,.6); }
+#btn-play:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+#btn-play.stop-mode { background: var(--playhead); box-shadow: 0 0 20px rgba(255,59,59,.4); }
+#btn-play.pulse-once {
+  animation: pulse-play .4s ease-out;
+}
+@keyframes pulse-play {
+  0% { box-shadow: 0 0 0 0 rgba(124,92,255,.7); }
+  70% { box-shadow: 0 0 0 14px rgba(124,92,255,0); }
+  100% { box-shadow: 0 0 20px rgba(124,92,255,.4); }
+}
+
+#elapsed {
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  color: var(--text-primary);
+  min-width: 72px;
+}
+
+#now-playing {
+  font-size: 12px;
+  color: var(--gold);
+  min-width: 120px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity .3s;
+}
+#now-playing.visible { opacity: 1; }
+
+#coach-line {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: opacity .4s;
+}
+#coach-line.hidden { opacity: 0; }
+
+/* #13: legible throwaway stamp */
+#stamp {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(232,233,239,.65);
+  letter-spacing: .04em;
+  pointer-events: none;
+  border: 1px dashed rgba(232,233,239,.35);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* ── STAGE ────────────────────────────────────────────────────── */
+#stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Empty-state hint (#2) */
+#empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+  gap: 8px;
+}
+#empty-hint.hidden { display: none; }
+#empty-hint-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(232,233,239,.45);
+  text-align: center;
+  letter-spacing: .01em;
+}
+#empty-hint-sub {
+  font-size: 13px;
+  color: rgba(232,233,239,.28);
+  text-align: center;
+}
+
+/* Column grid lines */
+#col-grid {
+  position: absolute;
+  top: 0; left: var(--lane-header-w); right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.lane-row {
+  display: flex;
+  flex: 1;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  position: relative;
+  transition: background .15s;
+}
+.lane-row.drag-over {
+  background: var(--accent-dim);
+}
+.lane-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-radius: 0;
+  pointer-events: none;
+  transition: border-color .15s;
+  z-index: 2;
+}
+.lane-row.drop-target::before {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 12px var(--accent-dim);
+}
+
+.lane-header {
+  flex: 0 0 var(--lane-header-w);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 12px;
+  background: rgba(255,255,255,.025);
+  border-right: 1px solid var(--panel-border);
+  z-index: 5;
+  position: relative;
+}
+.lane-header-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.lane-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+}
+.lane-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* Key hints on lane headers (#14-15) */
+.lane-key-hint {
+  font-size: 10px;
+  color: var(--text-faint);
+  display: none;
+  font-weight: 600;
+  margin-left: 18px;
+  background: rgba(124,92,255,.18);
+  border: 1px solid rgba(124,92,255,.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: .04em;
+}
+body.key-selecting .lane-key-hint { display: block; }
+
+.lane-canvas {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* clip-snap columns (invisible hit areas) */
+.snap-col {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: var(--col-width);
+}
+
+/* ── PLACED CLIPS ─────────────────────────────────────────────── */
+.placed-clip {
+  position: absolute;
+  top: 8px; bottom: 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 5px 8px 4px;
+  cursor: grab;
+  transition: box-shadow .15s;
+  z-index: 10;
+  overflow: hidden;
+  min-width: 24px;
+}
+.placed-clip:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.placed-clip:active { cursor: grabbing; }
+.placed-clip.selected { border-color: rgba(255,255,255,.7); }
+.placed-clip.gold-overlap { box-shadow: 0 0 0 2px var(--gold), 0 0 12px var(--gold-glow); }
+/* Playback highlight (#12) */
+.placed-clip.playing-now {
+  box-shadow: 0 0 0 2px rgba(255,255,255,.7), 0 0 14px rgba(255,255,255,.2);
+  filter: brightness(1.25);
+}
+
+.clip-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.clip-dots {
+  flex: 1;
+  position: relative;
+  pointer-events: none;
+  margin-top: 3px;
+}
+.clip-dot {
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.6);
+}
+
+/* Delete button (#4) */
+.clip-delete-btn {
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.3);
+  background: rgba(0,0,0,.55);
+  color: rgba(255,255,255,.8);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 20;
+  transition: background .12s, color .12s;
+}
+.clip-delete-btn:hover {
+  background: var(--playhead);
+  color: #fff;
+  border-color: transparent;
+}
+.clip-delete-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+  display: flex;
+}
+.placed-clip:hover .clip-delete-btn,
+.placed-clip:focus-within .clip-delete-btn {
+  display: flex;
+}
+
+/* ── PLAYHEAD ─────────────────────────────────────────────────── */
+#playhead {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: var(--lane-header-w);
+  width: 2px;
+  background: var(--playhead);
+  z-index: 20;
+  pointer-events: none;
+  transform: translateX(0);
+  transition: none;
+}
+#playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--playhead);
+}
+
+/* ── BOTTOM TRAY ──────────────────────────────────────────────── */
+#tray {
+  flex: 0 0 var(--tray-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--panel-border);
+  position: relative;
+  z-index: 30;
+}
+
+/* Row-hint bar above tray (#11) */
+#tray-row-hint {
+  position: absolute;
+  top: -28px; left: 0; right: 0;
+  text-align: center;
+  font-size: 11px;
+  color: rgba(232,233,239,.38);
+  pointer-events: none;
+  font-style: italic;
+}
+
+.brick-card {
+  width: 148px;
+  height: 94px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 2px dotted var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 10px 12px 8px;
+  cursor: grab;
+  position: relative;
+  transition: transform .12s, box-shadow .12s, opacity .15s;
+  flex: 0 0 148px;
+}
+.brick-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.brick-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.brick-card.lifted {
+  transform: scale(1.03);
+  box-shadow: 0 16px 40px rgba(0,0,0,.7);
+  z-index: 100;
+  opacity: .9;
+}
+.brick-card.dimmed { opacity: .45; pointer-events: none; }
+.brick-card.selected-key {
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+/* Key-select drop hint overlay on selected card (#14-15) */
+.brick-key-drop-hint {
+  display: none;
+  position: absolute;
+  bottom: 4px; left: 0; right: 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .04em;
+  pointer-events: none;
+}
+.brick-card.selected-key .brick-key-drop-hint { display: block; }
+
+/* wobble on first card */
+@keyframes wobble {
+  0%,100% { transform: rotate(0deg); }
+  20% { transform: rotate(-3deg); }
+  60% { transform: rotate(3deg); }
+  80% { transform: rotate(-1.5deg); }
+}
+.brick-card.wobble { animation: wobble .7s ease-in-out; }
+
+/* Persistent first-card cue (#2) */
+@keyframes card-pulse-border {
+  0%,100% { border-color: rgba(124,92,255,.45); }
+  50%      { border-color: rgba(124,92,255,.85); }
+}
+.brick-card.first-card-cue {
+  border-style: solid;
+  border-color: rgba(124,92,255,.45);
+  animation: card-pulse-border 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brick-card.first-card-cue {
+    animation: none;
+    border-style: solid;
+    border-color: var(--accent);
+  }
+}
+
+.brick-stripe {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  border-radius: 10px 0 0 10px;
+}
+.brick-grip {
+  position: absolute;
+  right: 8px; top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  opacity: .45;
+  pointer-events: none;
+}
+.brick-grip span {
+  display: block;
+  width: 3px; height: 3px;
+  background: var(--text-muted);
+  border-radius: 50%;
+}
+.brick-icon {
+  font-size: 16px;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+.brick-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.brick-fingerprint {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  min-height: 20px;
+  margin-top: 4px;
+}
+.fp-dot {
+  position: absolute;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.5);
+}
+
+/* ── DRAG GHOST ───────────────────────────────────────────────── */
+#drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  border-radius: 8px;
+  opacity: .82;
+  display: none;
+  align-items: flex-start;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,.9);
+  transition: none;
+}
+#drag-ghost.refuse {
+  border: 2px dashed var(--refuse-orange);
+  background: var(--refuse-orange-dim);
+}
+
+/* ── SNAP LINE ────────────────────────────────────────────────── */
+#snap-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: rgba(255,255,255,.35);
+  pointer-events: none;
+  z-index: 25;
+  display: none;
+}
+
+/* ── TOOLTIPS ─────────────────────────────────────────────────── */
+.tooltip-tag {
+  position: fixed;
+  background: rgba(14,15,19,.95);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+  display: none;
+}
+.tooltip-tag.gold {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.tooltip-tag.refuse {
+  border-color: var(--refuse-orange);
+  color: var(--refuse-orange);
+}
+
+/* ── NUDGE TOAST ──────────────────────────────────────────────── */
+#nudge-toast {
+  position: fixed;
+  bottom: calc(var(--tray-h) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(14,15,19,.92);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 8px 18px;
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: 9990;
+  opacity: 0;
+  transition: opacity .3s;
+  text-align: center;
+  max-width: 90vw;
+}
+#nudge-toast.show { opacity: 1; }
+
+/* ── ARIA LIVE REGION ─────────────────────────────────────────── */
+#aria-live {
+  position: absolute;
+  left: -9999px;
+  width: 1px; height: 1px;
+  overflow: hidden;
+}
+
+/* ── GATE METRICS PANEL ───────────────────────────────────────── */
+#metrics-panel {
+  position: fixed;
+  top: 12px; left: 12px;
+  width: 280px;
+  background: rgba(14,15,19,.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  z-index: 9000;
+  font-size: 12px;
+  overflow: hidden;
+}
+/* #18: header is a plain container, toggle is the sole interactive child */
+#metrics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+#metrics-header span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+#metrics-toggle {
+  background: none; border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+}
+#metrics-toggle:hover { background: rgba(255,255,255,.08); }
+#metrics-toggle:focus-visible { outline: 1px solid var(--accent); }
+#metrics-body { padding: 10px 12px; display: block; }
+#metrics-body.collapsed { display: none; }
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 7px;
+  gap: 6px;
+}
+.metric-label { color: var(--text-muted); flex: 0 0 auto; }
+.metric-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+.badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+.badge.green { background: rgba(56,194,110,.25); color: #38c26e; }
+.badge.red   { background: rgba(255,59,59,.25);  color: #ff3b3b; }
+.badge.grey  { background: rgba(255,255,255,.1); color: var(--text-muted); }
+
+.metric-divider {
+  border: none;
+  border-top: 1px solid var(--panel-border);
+  margin: 8px 0;
+}
+
+#want-probe-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: block;
+}
+#want-probe-input {
+  width: 100%;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 5px 8px;
+  resize: none;
+  font-family: inherit;
+  height: 52px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#want-probe-input:focus {
+  outline: 1px solid var(--accent);
+  background: rgba(255,255,255,.07);
+}
+
+.want-tag-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
+.want-tag {
+  appearance: none;
+  border: 1px solid var(--panel-border);
+  background: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.want-tag:checked {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.want-tag:focus-visible { outline: 1px solid var(--accent); }
+
+#copy-json-btn, #download-json-btn {
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--panel-border);
+  color: var(--text-muted);
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .12s;
+}
+#copy-json-btn:hover, #download-json-btn:hover {
+  background: rgba(255,255,255,.12);
+  color: var(--text-primary);
+}
+#copy-json-btn:focus-visible, #download-json-btn:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+/* ── REDUCE MOTION ────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .brick-card.wobble { animation: none; }
+  .brick-card, .placed-clip, #btn-play, #btn-rewind { transition: none; }
+  .brick-card:hover { transform: none; }
+  .brick-card.lifted { transform: none; }
+  #now-playing { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Accessibility live region -->
+<div id="aria-live" aria-live="polite" aria-atomic="true" role="status"></div>
+
+<!-- Drag ghost (follows mouse) -->
+<div id="drag-ghost" aria-hidden="true"></div>
+
+<!-- Tooltip tag (reused) -->
+<div id="tooltip-tag" class="tooltip-tag" role="tooltip" aria-hidden="true"></div>
+
+<!-- Nudge toast -->
+<div id="nudge-toast" role="status" aria-live="polite"></div>
+
+<!-- ── GATE METRICS PANEL ────────────────────────────────────── -->
+<!-- #18: header is plain div, single <button> toggle carries aria-expanded -->
+<aside id="metrics-panel" aria-label="Gate metrics — facilitator panel">
+  <div id="metrics-header">
+    <span>Gate Metrics</span>
+    <button id="metrics-toggle" aria-expanded="false" aria-controls="metrics-body"
+            aria-label="Expand metrics panel" title="Click to expand/collapse">&#9660;</button>
+  </div>
+  <!-- #6: collapsed by default so want-probe categories are not visible to participant -->
+  <div id="metrics-body" class="collapsed">
+    <!-- P1 / P3 timer anchored to page load (#3) -->
+    <div class="metric-row">
+      <span class="metric-label">Session time (from open)</span>
+      <span class="metric-value" id="m-session-timer">0:00.0</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">P1/P3 First Combined Play</span>
+      <span class="metric-value" id="m-p1-timer">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Status</span>
+      <span id="m-p1-badge" class="badge grey">waiting</span>
+    </div>
+    <hr class="metric-divider"/>
+    <!-- Clips placed -->
+    <div class="metric-row">
+      <span class="metric-label">Clips placed (total)</span>
+      <span class="metric-value" id="m-clips-total">0</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Row 1 / Row 2 / Row 3</span>
+      <span class="metric-value" id="m-clips-rows">0 / 0 / 0</span>
+    </div>
+    <hr class="metric-divider"/>
+    <!-- P2 -->
+    <div class="metric-row">
+      <span class="metric-label">Moves after first play</span>
+      <span class="metric-value" id="m-p2-count">0</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">P2</span>
+      <span id="m-p2-badge" class="badge grey">waiting</span>
+    </div>
+    <hr class="metric-divider"/>
+    <!-- Want probe -->
+    <label id="want-probe-label" for="want-probe-input">
+      Unprimed want-probe answer (fill BEFORE showing stage):
+    </label>
+    <textarea id="want-probe-input"
+      placeholder="What participant said before the brief..."
+      aria-label="Unprimed want-probe answer"></textarea>
+    <div class="want-tag-row" role="group" aria-label="Quick-tag want category">
+      <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+        <input type="radio" name="want-tag" class="want-tag" value="combine" style="display:none"/>
+        <span class="want-tag" style="cursor:pointer">combine/arrange</span>
+      </label>
+      <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+        <input type="radio" name="want-tag" class="want-tag" value="export" style="display:none"/>
+        <span class="want-tag" style="cursor:pointer">export/share</span>
+      </label>
+      <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+        <input type="radio" name="want-tag" class="want-tag" value="keep-playing" style="display:none"/>
+        <span class="want-tag" style="cursor:pointer">keep-playing</span>
+      </label>
+      <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+        <input type="radio" name="want-tag" class="want-tag" value="other" style="display:none"/>
+        <span class="want-tag" style="cursor:pointer">other</span>
+      </label>
+    </div>
+    <hr class="metric-divider"/>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button id="copy-json-btn">Copy session JSON</button>
+      <button id="download-json-btn">Download JSON</button>
+    </div>
+  </div>
+</aside>
+
+<!-- ── MAIN APP ───────────────────────────────────────────────── -->
+<div id="app" role="main" aria-label="Brick Stack arrangement workspace">
+
+  <!-- Transport -->
+  <div id="transport" role="toolbar" aria-label="Transport controls">
+    <button id="btn-rewind" aria-label="Rewind to start" title="Rewind to start">&#9664;&#9664;</button>
+    <button id="btn-play" aria-label="Play" title="Play (Space)">&#9654;</button>
+    <div id="elapsed" aria-label="Elapsed time" aria-live="off">0:00.0</div>
+    <div id="now-playing" aria-live="polite" aria-label="Now playing"></div>
+    <div id="coach-line" aria-hidden="true"></div>
+    <div id="stamp" aria-hidden="true">THROWAWAY PROTOTYPE — synth audio only</div>
+  </div>
+
+  <!-- Stage -->
+  <div id="stage" aria-label="Arrangement stage — drag bricks onto rows to place them">
+    <!-- Playhead -->
+    <div id="playhead" aria-hidden="true"></div>
+    <!-- Snap line -->
+    <div id="snap-line" aria-hidden="true"></div>
+    <!-- Column grid (rendered by JS) -->
+    <div id="col-grid" aria-hidden="true"></div>
+    <!-- Empty-state hint (#2) -->
+    <div id="empty-hint" aria-hidden="true">
+      <div id="empty-hint-text">Drag a card up here to start your song</div>
+      <div id="empty-hint-sub">Stack bricks in different rows to layer them</div>
+    </div>
+    <!-- Lane rows rendered by JS -->
+    <div id="lanes-container" style="display:flex;flex-direction:column;height:100%;">
+    </div>
+  </div>
+
+  <!-- Bottom tray -->
+  <div id="tray" role="region" aria-label="Brick tray — drag a card onto a row above">
+    <div id="tray-row-hint">Stack bricks in different rows to layer them</div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  BRICK STACK — interactive prototype
+//  POC-004 / DISCOVERY-001 OQ-3
+//  Throwaway: pure HTML/CSS/JS, no deps, no build
+// ═══════════════════════════════════════════════════════════════
+
+"use strict";
+
+// ── CONSTANTS ───────────────────────────────────────────────────
+const COL_W = 96;
+const NUM_COLS = 10;
+const LANE_COUNT = 3;
+
+// Page-load anchor for P1/P3 timer (#3)
+const PAGE_LOAD_MS = Date.now();
+
+// ── BRICK DEFINITIONS ───────────────────────────────────────────
+const BRICKS = [
+  {
+    id: 'drums',
+    name: 'Drums',
+    icon: '🥁',
+    color: '#e0a23b',
+    preset: 'drums',
+    durSec: 2.0,
+    notes: [
+      {t:0.00, d:0.12, m:36},
+      {t:0.25, d:0.08, m:42},
+      {t:0.50, d:0.12, m:38},
+      {t:0.75, d:0.08, m:42},
+      {t:1.00, d:0.12, m:36},
+      {t:1.25, d:0.08, m:42},
+      {t:1.50, d:0.12, m:38},
+      {t:1.75, d:0.08, m:42},
+    ],
+    fp: [
+      {x:5,y:72},{x:17,y:40},{x:32,y:72},{x:48,y:40},
+      {x:64,y:72},{x:78,y:40},{x:93,y:72},{x:108,y:40},
+    ]
+  },
+  {
+    id: 'bass',
+    name: 'Bass',
+    icon: '🎸',
+    color: '#1fa8a0',
+    preset: 'bass',
+    durSec: 2.0,
+    notes: [
+      {t:0.00, d:0.45, m:33},
+      {t:0.50, d:0.45, m:33},
+      {t:1.00, d:0.45, m:40},
+      {t:1.50, d:0.45, m:33},
+    ],
+    fp: [
+      {x:8, y:68},{x:42,y:68},{x:70,y:45},{x:104,y:68},
+    ]
+  },
+  {
+    id: 'melody',
+    name: 'Melody',
+    icon: '🎵',
+    color: '#9b7cff',
+    preset: 'melody',
+    durSec: 2.5,
+    notes: [
+      {t:0.00, d:0.35, m:69},
+      {t:0.50, d:0.25, m:71},
+      {t:0.90, d:0.35, m:72},
+      {t:1.40, d:0.25, m:69},
+      {t:1.80, d:0.55, m:67},
+    ],
+    fp: [
+      {x:5, y:30},{x:40,y:22},{x:72,y:15},{x:100,y:30},{x:126,y:42},
+    ]
+  },
+  {
+    id: 'chords',
+    name: 'Chords',
+    icon: '🎹',
+    color: '#e06a8b',
+    preset: 'chords',
+    durSec: 3.0,
+    notes: [
+      {t:0.00, d:0.90, m:57},{t:0.00, d:0.90, m:60},{t:0.00, d:0.90, m:64},
+      {t:1.00, d:0.90, m:53},{t:1.00, d:0.90, m:57},{t:1.00, d:0.90, m:60},
+      {t:2.00, d:0.90, m:60},{t:2.00, d:0.90, m:64},{t:2.00, d:0.90, m:67},
+    ],
+    fp: [
+      {x:5,y:55},{x:5,y:38},{x:5,y:20},
+      {x:58,y:62},{x:58,y:45},{x:58,y:28},
+      {x:110,y:50},{x:110,y:33},{x:110,y:16},
+    ]
+  },
+  {
+    id: 'arp',
+    name: 'Arp',
+    icon: '✦',
+    color: '#3ec9d6',
+    preset: 'arp',
+    durSec: 1.0,
+    notes: [
+      {t:0.00, d:0.10, m:69},
+      {t:0.125,d:0.10, m:72},
+      {t:0.25, d:0.10, m:76},
+      {t:0.375,d:0.10, m:81},
+      {t:0.50, d:0.10, m:76},
+      {t:0.625,d:0.10, m:72},
+      {t:0.75, d:0.10, m:69},
+      {t:0.875,d:0.10, m:72},
+    ],
+    fp: [
+      {x:5,y:60},{x:20,y:45},{x:35,y:25},{x:50,y:10},
+      {x:65,y:25},{x:80,y:45},{x:95,y:60},{x:110,y:45},
+    ]
+  }
+];
+
+// #11: distinct row accent colors + row-number key hint text
+const LANE_META = [
+  { id: 'lane-0', label: 'Row 1', color: '#7c5cff', keyHint: 'Press 1' },
+  { id: 'lane-1', label: 'Row 2', color: '#1fa8a0', keyHint: 'Press 2' },
+  { id: 'lane-2', label: 'Row 3', color: '#e06a8b', keyHint: 'Press 3' },
+];
+
+// ── STATE ────────────────────────────────────────────────────────
+const state = {
+  placedClips: [],
+  nextClipId: 0,
+
+  drag: null,
+  dragOver: null,
+
+  keySelected: null,
+
+  // Playback
+  audioCtx: null,
+  masterGain: null,    // #16: shared master GainNode
+  isPlaying: false,
+  playStartCtxTime: 0,
+  playStartMs: 0,
+  scheduledNodes: [],
+  playheadRaf: null,
+  songDurSec: 0,
+
+  // Gate metrics (#3: anchored to page load)
+  pageLoadMs: PAGE_LOAD_MS,
+  firstInteractionMs: null,     // wall-clock ms of first interaction (sub-metric)
+  firstCombinedPlayMs: null,    // elapsed from PAGE LOAD when P1 was met
+  p1Met: false,
+  p2Count: 0,
+  p2Met: false,
+  p3Violated: false,
+  firstPlayOccurred: false,
+  clipsMovedAfterPlay: new Set(),
+
+  // Coach state
+  coachDropShown: false,
+  nudgePostPlayShown: false,
+  nudgeMoveShown: false,
+  firstDropDone: false,         // controls empty-hint visibility
+
+  // Undo (#10): single-level
+  lastAction: null,             // {type:'place'|'move'|'delete', ...}
+
+  // Refuse debounce (#9)
+  _refuseAnnounceTimer: null,
+};
+
+// ── DOM REFS ────────────────────────────────────────────────────
+const $tray        = document.getElementById('tray');
+const $lanes       = document.getElementById('lanes-container');
+const $playhead    = document.getElementById('playhead');
+const $snapLine    = document.getElementById('snap-line');
+const $ghost       = document.getElementById('drag-ghost');
+const $tooltip     = document.getElementById('tooltip-tag');
+const $nudge       = document.getElementById('nudge-toast');
+const $elapsed     = document.getElementById('elapsed');
+const $nowPlaying  = document.getElementById('now-playing');
+const $coach       = document.getElementById('coach-line');
+const $btnPlay     = document.getElementById('btn-play');
+const $btnRewind   = document.getElementById('btn-rewind');
+const $ariaLive    = document.getElementById('aria-live');
+const $emptyHint   = document.getElementById('empty-hint');
+
+// Metrics DOM
+const $mSessionTimer = document.getElementById('m-session-timer');
+const $mP1Timer    = document.getElementById('m-p1-timer');
+const $mP1Badge    = document.getElementById('m-p1-badge');
+const $mClipsTotal = document.getElementById('m-clips-total');
+const $mClipsRows  = document.getElementById('m-clips-rows');
+const $mP2Count    = document.getElementById('m-p2-count');
+const $mP2Badge    = document.getElementById('m-p2-badge');
+const $wantInput   = document.getElementById('want-probe-input');
+const $copyBtn     = document.getElementById('copy-json-btn');
+const $dlBtn       = document.getElementById('download-json-btn');
+
+let laneEls = [];
+let laneCanvasEls = [];
+
+// ── UTILITIES ───────────────────────────────────────────────────
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function formatTime(ms) {
+  const total = Math.max(0, ms);
+  const m = Math.floor(total / 60000);
+  const s = Math.floor((total % 60000) / 1000);
+  const t = Math.floor((total % 1000) / 100);
+  return `${m}:${String(s).padStart(2,'0')}.${t}`;
+}
+function announce(msg) {
+  $ariaLive.textContent = '';
+  requestAnimationFrame(() => { $ariaLive.textContent = msg; });
+}
+function showNudge(msg, durationMs) {
+  durationMs = durationMs || 3500;
+  $nudge.textContent = msg;
+  $nudge.classList.add('show');
+  clearTimeout(showNudge._t);
+  showNudge._t = setTimeout(() => $nudge.classList.remove('show'), durationMs);
+}
+function getBrickById(id) { return BRICKS.find(b => b.id === id); }
+function getClipById(id)  { return state.placedClips.find(c => c.id === id); }
+function isInputFocused() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA';
+}
+
+// ── INIT ─────────────────────────────────────────────────────────
+function init() {
+  buildLanes();
+  buildTray();
+  buildColGrid();
+  buildCoachLine();
+  wireTransport();
+  wireMetricsPanel();
+  wireKeyboard();
+
+  // First-card wobble + persistent cue (#2)
+  const firstCard = $tray.querySelector('.brick-card');
+  if (firstCard) {
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!prefersReduced) {
+      firstCard.classList.add('wobble');
+      firstCard.addEventListener('animationend', () => firstCard.classList.remove('wobble'), {once:true});
+    }
+    firstCard.classList.add('first-card-cue');
+  }
+
+  // #3: session timer running from page load
+  startSessionTimer();
+
+  updateMetrics();
+}
+
+// ── SESSION TIMER (anchored to page load) ────────────────────────
+let sessionTimerInterval = null;
+function startSessionTimer() {
+  if (sessionTimerInterval) return;
+  sessionTimerInterval = setInterval(() => {
+    const elapsed = Date.now() - state.pageLoadMs;
+    $mSessionTimer.textContent = formatTime(elapsed);
+
+    // P3 check: if P1 not yet met and >=5 min from page load
+    if (!state.p1Met && elapsed > 300000 && !state.p3Violated) {
+      state.p3Violated = true;
+      $mP1Badge.textContent = '>5min — P3 FAIL';
+      $mP1Badge.className = 'badge red';
+    }
+    // Also update the P1 timer display while waiting
+    if (!state.p1Met) {
+      $mP1Timer.textContent = formatTime(elapsed);
+    }
+  }, 100);
+}
+
+// ── LANE BUILDER ─────────────────────────────────────────────────
+function buildLanes() {
+  LANE_META.forEach((meta, i) => {
+    const row = document.createElement('div');
+    row.className = 'lane-row';
+    row.dataset.laneIdx = i;
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', `${meta.label} — drop a brick here`);
+
+    const hdr = document.createElement('div');
+    hdr.className = 'lane-header';
+
+    const hdrTop = document.createElement('div');
+    hdrTop.className = 'lane-header-top';
+
+    const dot = document.createElement('div');
+    dot.className = 'lane-dot';
+    dot.style.background = meta.color;
+    const lbl = document.createElement('div');
+    lbl.className = 'lane-label';
+    lbl.textContent = meta.label;
+    hdrTop.appendChild(dot);
+    hdrTop.appendChild(lbl);
+
+    // Key hint (#14-15): shown via CSS when body.key-selecting
+    const keyHint = document.createElement('div');
+    keyHint.className = 'lane-key-hint';
+    keyHint.textContent = meta.keyHint;
+    keyHint.setAttribute('aria-hidden', 'true');
+
+    hdr.appendChild(hdrTop);
+    hdr.appendChild(keyHint);
+
+    const canvas = document.createElement('div');
+    canvas.className = 'lane-canvas';
+    canvas.dataset.laneIdx = i;
+
+    for (let c = 0; c < NUM_COLS; c++) {
+      const col = document.createElement('div');
+      col.className = 'snap-col';
+      col.style.left = `${c * COL_W}px`;
+      canvas.appendChild(col);
+    }
+
+    row.appendChild(hdr);
+    row.appendChild(canvas);
+    $lanes.appendChild(row);
+    laneEls.push(row);
+    laneCanvasEls.push(canvas);
+  });
+}
+
+// ── COL GRID BUILDER ─────────────────────────────────────────────
+function buildColGrid() {
+  const grid = document.getElementById('col-grid');
+  for (let c = 1; c < NUM_COLS; c++) {
+    const line = document.createElement('div');
+    line.style.cssText = `
+      position:absolute; top:0; bottom:0;
+      left:${c * COL_W}px; width:1px;
+      background: rgba(255,255,255,.055);
+    `;
+    grid.appendChild(line);
+  }
+}
+
+// ── TRAY BUILDER ─────────────────────────────────────────────────
+function buildTray() {
+  BRICKS.forEach((brick) => {
+    const card = document.createElement('div');
+    card.className = 'brick-card';
+    card.dataset.brickId = brick.id;
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.setAttribute('draggable', 'true');
+    card.setAttribute('aria-label',
+      `${brick.name} brick — press Enter to select, then press 1, 2 or 3 to place on a row`);
+    card.setAttribute('aria-pressed', 'false');
+
+    const stripe = document.createElement('div');
+    stripe.className = 'brick-stripe';
+    stripe.style.background = brick.color;
+    card.appendChild(stripe);
+
+    const icon = document.createElement('div');
+    icon.className = 'brick-icon';
+    icon.textContent = brick.icon;
+    const name = document.createElement('div');
+    name.className = 'brick-name';
+    name.textContent = brick.name;
+    card.appendChild(icon);
+    card.appendChild(name);
+
+    const fp = document.createElement('div');
+    fp.className = 'brick-fingerprint';
+    fp.setAttribute('aria-hidden', 'true');
+    brick.fp.forEach(dot => {
+      const d = document.createElement('div');
+      d.className = 'fp-dot';
+      d.style.left = `${dot.x / 130 * 100}%`;
+      d.style.top  = `${dot.y / 88 * 100}%`;
+      fp.appendChild(d);
+    });
+    card.appendChild(fp);
+
+    const grip = document.createElement('div');
+    grip.className = 'brick-grip';
+    grip.setAttribute('aria-hidden', 'true');
+    for (let g = 0; g < 3; g++) {
+      const s = document.createElement('span');
+      grip.appendChild(s);
+    }
+    card.appendChild(grip);
+
+    // Key-select drop hint (#14-15): "Press 1, 2, or 3 to drop this on a row"
+    const kdhint = document.createElement('div');
+    kdhint.className = 'brick-key-drop-hint';
+    kdhint.textContent = 'Press 1, 2 or 3 to drop on a row';
+    kdhint.setAttribute('aria-hidden', 'true');
+    card.appendChild(kdhint);
+
+    card.addEventListener('mousedown', onTrayMouseDown);
+    card.addEventListener('touchstart', onTrayTouchStart, {passive: false});
+    card.addEventListener('keydown', onTrayKeyDown);
+    card.addEventListener('dragstart', e => e.preventDefault());
+
+    $tray.appendChild(card);
+  });
+}
+
+// ── COACH LINE ───────────────────────────────────────────────────
+function buildCoachLine() {
+  $coach.classList.add('hidden');
+}
+function showCoachLine(msg) {
+  $coach.textContent = msg;
+  $coach.classList.remove('hidden');
+}
+function hideCoachLine() {
+  $coach.classList.add('hidden');
+}
+
+// ── FIRST INTERACTION ────────────────────────────────────────────
+function markFirstInteraction() {
+  if (state.firstInteractionMs === null) {
+    state.firstInteractionMs = Date.now();
+  }
+}
+
+// ── METRICS ──────────────────────────────────────────────────────
+function updateMetrics() {
+  const total = state.placedClips.length;
+  $mClipsTotal.textContent = total;
+  const rows = [0,1,2].map(i => state.placedClips.filter(c => c.laneIdx === i).length);
+  $mClipsRows.textContent = rows.join(' / ');
+  $mP2Count.textContent = state.p2Count;
+
+  if (state.p2Met) {
+    $mP2Badge.textContent = 'P2 MET';
+    $mP2Badge.className = 'badge green';
+  }
+}
+
+// DEPRECATED geometric P1 check — kept only as internal helper, NOT used for gate.
+// P1 gate is now measured audibly via computeScheduledAudibleOverlap() + audioCtx.state.
+function _checkGeometricOverlap() {
+  const lanesUsed = new Set(state.placedClips.map(c => c.laneIdx));
+  if (lanesUsed.size < 2) return false;
+
+  const colsByLane = {};
+  state.placedClips.forEach(c => {
+    const brick = getBrickById(c.brickId);
+    const spanCols = Math.ceil(brick.durSec);
+    for (let i = 0; i < spanCols; i++) {
+      const col = c.col + i;
+      if (!colsByLane[col]) colsByLane[col] = new Set();
+      colsByLane[col].add(c.laneIdx);
+    }
+  });
+  return Object.values(colsByLane).some(laneSet => laneSet.size >= 2);
+}
+
+// Audible-overlap check: returns true if, among the clips that were just scheduled,
+// at least 2 notes from at least 2 DIFFERENT clips on DIFFERENT lanes overlap in
+// absolute audio time — i.e. they genuinely sound together.
+// Must be called after scheduleAllClips() so clip.col values are authoritative.
+function computeScheduledAudibleOverlap() {
+  // Build a time-window per clip: [startSec, endSec, laneIdx, clipId]
+  const windows = state.placedClips.map(c => {
+    const brick = getBrickById(c.brickId);
+    return {
+      clipId: c.id,
+      laneIdx: c.laneIdx,
+      startSec: c.col,           // col index = seconds (1 col = 1 s)
+      endSec: c.col + brick.durSec,
+    };
+  });
+
+  // Check every pair: different lanes AND time windows overlap
+  for (let i = 0; i < windows.length; i++) {
+    for (let j = i + 1; j < windows.length; j++) {
+      const a = windows[i];
+      const b = windows[j];
+      if (a.laneIdx === b.laneIdx) continue;
+      // Overlap when neither ends before the other starts
+      if (a.startSec < b.endSec && b.startSec < a.endSec) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function markP1Met() {
+  if (state.p1Met) return;
+  state.p1Met = true;
+  // #3: elapsed from page load
+  const elapsed = Date.now() - state.pageLoadMs;
+  state.firstCombinedPlayMs = elapsed;
+  $mP1Timer.textContent = formatTime(elapsed);
+  $mP1Badge.textContent = 'P1 MET';
+  $mP1Badge.className = 'badge green';
+  console.log('[GATE] P1 MET — first combined playback at', formatTime(elapsed), '(from page load)');
+}
+
+// ── TRAY DRAG (mouse) ────────────────────────────────────────────
+function onTrayMouseDown(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  markFirstInteraction();
+  const card = e.currentTarget;
+  const brickId = card.dataset.brickId;
+  const rect = card.getBoundingClientRect();
+  startDragFromTray(brickId, e.clientX, e.clientY,
+    e.clientX - rect.left, e.clientY - rect.top);
+}
+
+// ── TRAY DRAG (touch) ────────────────────────────────────────────
+function onTrayTouchStart(e) {
+  e.preventDefault();
+  markFirstInteraction();
+  const card = e.currentTarget;
+  const brickId = card.dataset.brickId;
+  const touch = e.touches[0];
+  const rect = card.getBoundingClientRect();
+  startDragFromTray(brickId, touch.clientX, touch.clientY,
+    touch.clientX - rect.left, touch.clientY - rect.top);
+}
+
+function startDragFromTray(brickId, clientX, clientY, offX, offY) {
+  state.keySelected = null;
+  clearTrayKeySelect();
+
+  state.drag = {
+    type: 'tray',
+    brickId,
+    startX: clientX,
+    startY: clientY,
+    ghostOffX: offX,
+    ghostOffY: offY,
+  };
+
+  const brick = getBrickById(brickId);
+
+  document.querySelectorAll('.brick-card').forEach(c => {
+    if (c.dataset.brickId === brickId) c.classList.add('lifted');
+    else c.classList.add('dimmed');
+  });
+
+  laneEls.forEach(l => l.classList.add('drop-target'));
+  setupGhost(brick, clientX - offX, clientY - offY);
+
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup',   onDragEnd);
+  document.addEventListener('touchmove', onDragTouchMove, {passive:false});
+  document.addEventListener('touchend',  onDragTouchEnd);
+}
+
+// ── CLIP DRAG (reposition) ───────────────────────────────────────
+function startDragFromClip(clipId, clientX, clientY) {
+  markFirstInteraction();
+  const clip = getClipById(clipId);
+  if (!clip) return;
+  const brick = getBrickById(clip.brickId);
+
+  state.drag = {
+    type: 'clip',
+    brickId: clip.brickId,
+    clipId,
+    originLane: clip.laneIdx,
+    originCol: clip.col,
+    startX: clientX,
+    startY: clientY,
+    ghostOffX: 10,
+    ghostOffY: 10,
+  };
+
+  clip.el.style.opacity = '0.25';
+
+  laneEls.forEach((l, i) => {
+    if (i === clip.laneIdx) l.classList.add('drop-target');
+  });
+
+  setupGhost(brick, clientX - 10, clientY - 10);
+
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup',   onDragEnd);
+  document.addEventListener('touchmove', onDragTouchMove, {passive:false});
+  document.addEventListener('touchend',  onDragTouchEnd);
+}
+
+function setupGhost(brick, x, y) {
+  const durCols = Math.ceil(brick.durSec);
+  const ghostW = Math.max(60, durCols * COL_W - 4);
+  $ghost.style.display = 'flex';
+  $ghost.style.width = `${ghostW}px`;
+  $ghost.style.height = '60px';
+  $ghost.style.background = hexToRgba(brick.color, 0.35);
+  $ghost.style.border = `2px dashed ${brick.color}`;
+  $ghost.style.borderRadius = '8px';
+  $ghost.style.left = `${x}px`;
+  $ghost.style.top  = `${y}px`;
+  $ghost.textContent = brick.name;
+  $ghost.className = '';
+}
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ── DRAG MOVE ────────────────────────────────────────────────────
+function onDragMove(e) {
+  if (!state.drag) return;
+  updateDragPosition(e.clientX, e.clientY);
+}
+function onDragTouchMove(e) {
+  if (!state.drag) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  updateDragPosition(t.clientX, t.clientY);
+}
+
+function updateDragPosition(clientX, clientY) {
+  const d = state.drag;
+  $ghost.style.left = `${clientX - d.ghostOffX}px`;
+  $ghost.style.top  = `${clientY - d.ghostOffY}px`;
+
+  const hit = hitTestStage(clientX, clientY);
+  state.dragOver = hit;
+
+  if (hit) {
+    const laneCanvas = laneCanvasEls[hit.laneIdx];
+    const canvasRect = laneCanvas.getBoundingClientRect();
+    const snapX = canvasRect.left + hit.col * COL_W;
+    $snapLine.style.left = `${snapX}px`;
+    $snapLine.style.display = 'block';
+
+    const brick = getBrickById(d.brickId);
+    const refuse = hit.refused;
+
+    if (refuse) {
+      // #17: generic refusal copy
+      showTooltip(clientX, clientY - 40,
+        "This spot's taken — drop it on an empty row, or further along", 'refuse');
+      $ghost.className = 'refuse';
+      $ghost.style.border = `2px dashed var(--refuse-orange)`;
+      $ghost.style.background = hexToRgba('#ff7b35', 0.18);
+      // #9: debounced aria-live on refusal
+      debouncedAnnounceRefuse("This spot is taken — try an empty row or further along");
+    } else {
+      $ghost.className = '';
+      $ghost.style.border = `2px dashed ${brick.color}`;
+      $ghost.style.background = hexToRgba(brick.color, 0.35);
+
+      if (checkWillCombine(d.brickId, hit.laneIdx, hit.col)) {
+        showTooltip(clientX, clientY - 40, 'These will play together', 'gold');
+        updateGoldOverlap(hit.col, getBrickById(d.brickId).durSec);
+        $btnPlay.classList.remove('pulse-once');
+        void $btnPlay.offsetWidth;
+        $btnPlay.classList.add('pulse-once');
+        $btnPlay.title = 'Press Play to hear them together';
+      } else {
+        hideTooltip();
+        clearGoldOverlap();
+      }
+    }
+  } else {
+    $snapLine.style.display = 'none';
+    hideTooltip();
+    clearGoldOverlap();
+    const brick = getBrickById(d.brickId);
+    $ghost.className = '';
+    $ghost.style.border = `2px dashed ${brick.color}`;
+    $ghost.style.background = hexToRgba(brick.color, 0.35);
+  }
+
+  laneEls.forEach((l, i) => {
+    if (hit && hit.laneIdx === i) l.classList.add('drag-over');
+    else l.classList.remove('drag-over');
+  });
+}
+
+// #9: debounced aria-live on refusal (100ms)
+function debouncedAnnounceRefuse(msg) {
+  clearTimeout(state._refuseAnnounceTimer);
+  state._refuseAnnounceTimer = setTimeout(() => announce(msg), 100);
+}
+
+// ── DRAG END ─────────────────────────────────────────────────────
+function onDragEnd(e) { finishDrag(e.clientX, e.clientY); }
+function onDragTouchEnd(e) {
+  const t = e.changedTouches[0];
+  finishDrag(t.clientX, t.clientY);
+}
+
+function finishDrag(clientX, clientY) {
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup',   onDragEnd);
+  document.removeEventListener('touchmove', onDragTouchMove);
+  document.removeEventListener('touchend',  onDragTouchEnd);
+
+  const hit = state.dragOver;
+  const d   = state.drag;
+
+  $ghost.style.display = 'none';
+  $snapLine.style.display = 'none';
+  hideTooltip();
+  clearGoldOverlap();
+  laneEls.forEach(l => l.classList.remove('drop-target', 'drag-over'));
+  document.querySelectorAll('.brick-card').forEach(c => c.classList.remove('lifted', 'dimmed'));
+
+  if (d && hit && !hit.refused) {
+    if (d.type === 'tray') {
+      placeClip(d.brickId, hit.laneIdx, hit.col);
+    } else if (d.type === 'clip') {
+      repositionClip(d.clipId, hit.col);
+    }
+  } else if (d && d.type === 'clip') {
+    const clip = getClipById(d.clipId);
+    if (clip) clip.el.style.opacity = '1';
+  }
+
+  state.drag = null;
+  state.dragOver = null;
+}
+
+// ── HIT TEST ─────────────────────────────────────────────────────
+function hitTestStage(clientX, clientY) {
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const canvas = laneCanvasEls[i];
+    const rect = canvas.getBoundingClientRect();
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      const relX = clientX - rect.left;
+      const col  = Math.max(0, Math.min(NUM_COLS - 1, Math.round(relX / COL_W)));
+      const adjustedCol = state.drag && state.drag.type === 'tray' &&
+                          state.placedClips.length === 0 ? 0 : col;
+
+      if (state.drag && state.drag.type === 'tray') {
+        const brick = getBrickById(state.drag.brickId);
+        const durCols = Math.ceil(brick.durSec);
+        const refused = checkSameLaneOverlap(i, adjustedCol, durCols, null);
+        return { laneIdx: i, col: adjustedCol, refused };
+      } else if (state.drag && state.drag.type === 'clip') {
+        if (i !== state.drag.originLane) return null;
+        const brick = getBrickById(state.drag.brickId);
+        const durCols = Math.ceil(brick.durSec);
+        const refused = checkSameLaneOverlap(i, col, durCols, state.drag.clipId);
+        return { laneIdx: i, col, refused };
+      }
+    }
+  }
+  return null;
+}
+
+function checkSameLaneOverlap(laneIdx, col, durCols, excludeClipId) {
+  return state.placedClips.some(c => {
+    if (c.laneIdx !== laneIdx) return false;
+    if (excludeClipId && c.id === excludeClipId) return false;
+    const cBrick = getBrickById(c.brickId);
+    const cEnd   = c.col + Math.ceil(cBrick.durSec);
+    const newEnd = col + durCols;
+    return col < cEnd && newEnd > c.col;
+  });
+}
+
+function checkWillCombine(brickId, laneIdx, col) {
+  const brick = getBrickById(brickId);
+  const durCols = Math.ceil(brick.durSec);
+  const newEnd = col + durCols;
+  return state.placedClips.some(c => {
+    if (c.laneIdx === laneIdx) return false;
+    const cBrick = getBrickById(c.brickId);
+    const cEnd = c.col + Math.ceil(cBrick.durSec);
+    return col < cEnd && newEnd > c.col;
+  });
+}
+
+// ── GOLD OVERLAP HIGHLIGHT ───────────────────────────────────────
+function updateGoldOverlap(col, durSec) {
+  const durCols = Math.ceil(durSec);
+  state.placedClips.forEach(c => {
+    const cBrick = getBrickById(c.brickId);
+    const cEnd   = c.col + Math.ceil(cBrick.durSec);
+    const newEnd = col + durCols;
+    if (col < cEnd && newEnd > c.col) {
+      c.el.classList.add('gold-overlap');
+    } else {
+      c.el.classList.remove('gold-overlap');
+    }
+  });
+}
+function clearGoldOverlap() {
+  state.placedClips.forEach(c => c.el.classList.remove('gold-overlap'));
+}
+
+// ── PLACE CLIP ───────────────────────────────────────────────────
+function placeClip(brickId, laneIdx, col, fromUndo) {
+  const brick = getBrickById(brickId);
+  const id    = fromUndo !== undefined ? fromUndo : state.nextClipId++;
+  const durCols = Math.ceil(brick.durSec);
+  const w = durCols * COL_W - 4;
+
+  const el = document.createElement('div');
+  el.className = 'placed-clip';
+  el.dataset.clipId = id;
+  el.dataset.brickId = brickId;
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label',
+    `Clip: ${brick.name}, ${brick.durSec}s, ${LANE_META[laneIdx].label}, column ${col}`);
+  el.style.left   = `${col * COL_W + 2}px`;
+  el.style.width  = `${w}px`;
+  el.style.background = hexToRgba(brick.color, 0.28);
+  el.style.borderColor = brick.color;
+  el.style.borderTopWidth = '3px';
+
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!prefersReduced) {
+    el.style.transform = 'scale(0.85)';
+    el.style.opacity = '0';
+    el.style.transition = 'transform .15s ease-out, opacity .12s';
+    requestAnimationFrame(() => {
+      el.style.transform = 'scale(1)';
+      el.style.opacity = '1';
+    });
+    el.addEventListener('transitionend', () => {
+      el.style.transition = '';
+      el.style.transform = '';
+      el.style.opacity = '';
+    }, {once: true});
+  }
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'clip-name';
+  nameEl.textContent = brick.name;
+  el.appendChild(nameEl);
+
+  const dotsEl = document.createElement('div');
+  dotsEl.className = 'clip-dots';
+  dotsEl.setAttribute('aria-hidden', 'true');
+  const maxT = brick.durSec;
+  const midiNotes = brick.notes.map(n => n.m);
+  const minMidi   = Math.min(...midiNotes);
+  const maxMidi   = Math.max(...midiNotes) || minMidi + 1;
+  const uniqueTimes = [...new Set(brick.notes.map(n => n.t))];
+  uniqueTimes.forEach(t => {
+    const n = brick.notes.find(nn => nn.t === t);
+    const d = document.createElement('div');
+    d.className = 'clip-dot';
+    d.style.left = `${(t / maxT) * 80 + 5}%`;
+    d.style.top  = `${100 - ((n.m - minMidi) / (maxMidi - minMidi + 1)) * 80 - 10}%`;
+    dotsEl.appendChild(d);
+  });
+  el.appendChild(dotsEl);
+
+  // #4: visible delete button
+  const delBtn = document.createElement('button');
+  delBtn.className = 'clip-delete-btn';
+  delBtn.setAttribute('aria-label', `Remove ${brick.name}`);
+  delBtn.setAttribute('tabindex', '0');
+  delBtn.textContent = '×';
+  delBtn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    removeClip(id);
+  });
+  el.appendChild(delBtn);
+
+  // Delete on right-click (kept alongside × button)
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    removeClip(id);
+  });
+
+  el.addEventListener('mousedown', ev => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    startDragFromClip(id, ev.clientX, ev.clientY);
+  });
+  el.addEventListener('touchstart', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const t = ev.touches[0];
+    startDragFromClip(id, t.clientX, t.clientY);
+  }, {passive: false});
+
+  el.addEventListener('keydown', ev => onClipKeyDown(ev, id));
+
+  state.placedClips.push({ id, brickId, laneIdx, col, el });
+  laneCanvasEls[laneIdx].appendChild(el);
+
+  // First clip: snap to col 0 and show coach
+  if (state.placedClips.length === 1) {
+    if (col !== 0) {
+      state.placedClips[state.placedClips.length - 1].col = 0;
+      el.style.left = '2px';
+    }
+    if (!state.coachDropShown) {
+      state.coachDropShown = true;
+      showCoachLine(
+        'Now drop another brick in the same column, one row up or down, then press Play to hear them together.'
+      );
+    }
+    // Remove first-card-cue from all tray cards on first drop
+    document.querySelectorAll('.brick-card.first-card-cue').forEach(c => c.classList.remove('first-card-cue'));
+  }
+
+  // Hide empty-hint (#2) after first drop
+  if (!state.firstDropDone) {
+    state.firstDropDone = true;
+    $emptyHint.classList.add('hidden');
+  }
+
+  // Combine feedback (#8: always announce combine, pointer AND keyboard)
+  const placedCol = state.placedClips[state.placedClips.length - 1].col;
+  const willCombine = checkWillCombineByClip(id);
+  if (willCombine) {
+    announce(`${brick.name} placed on ${LANE_META[laneIdx].label} — will play together with existing bricks. Press Play to hear them together.`);
+    // Gold glow on existing overlapping clips
+    updateGoldOverlapForPlaced(id);
+    // Play button pulse
+    $btnPlay.classList.remove('pulse-once');
+    void $btnPlay.offsetWidth;
+    $btnPlay.classList.add('pulse-once');
+    $btnPlay.title = 'Press Play to hear them together';
+    // Coach line update
+    showCoachLine('Press Play to hear them together!');
+  } else {
+    announce(`${brick.name} placed on ${LANE_META[laneIdx].label} at column ${placedCol}`);
+  }
+
+  // #7: focus newly placed clip + announcement
+  requestAnimationFrame(() => {
+    el.focus();
+    // announce already done above; add movement hint
+    const moveAnnounce = `${brick.name} placed on ${LANE_META[laneIdx].label}. Arrow keys move it, Delete removes.`;
+    // Use a slight delay so screen reader doesn't collide with placement announce
+    setTimeout(() => { $ariaLive.textContent = moveAnnounce; }, 600);
+  });
+
+  // Undo record (#10)
+  if (fromUndo === undefined) {
+    state.lastAction = { type: 'place', id, brickId, laneIdx, col: placedCol };
+    showNudge(`Placed ${brick.name} on ${LANE_META[laneIdx].label} · Undo (Ctrl/Cmd+Z)`, 3000);
+  }
+
+  updateMetrics();
+  updateSongDur();
+}
+
+// Check if a just-placed clip overlaps with clips on different lanes
+function checkWillCombineByClip(clipId) {
+  const clip = getClipById(clipId);
+  if (!clip) return false;
+  const brick = getBrickById(clip.brickId);
+  const durCols = Math.ceil(brick.durSec);
+  const clipEnd = clip.col + durCols;
+  return state.placedClips.some(c => {
+    if (c.id === clipId || c.laneIdx === clip.laneIdx) return false;
+    const cBrick = getBrickById(c.brickId);
+    const cEnd = c.col + Math.ceil(cBrick.durSec);
+    return clip.col < cEnd && clipEnd > c.col;
+  });
+}
+
+function updateGoldOverlapForPlaced(clipId) {
+  const clip = getClipById(clipId);
+  if (!clip) return;
+  const brick = getBrickById(clip.brickId);
+  const durCols = Math.ceil(brick.durSec);
+  const clipEnd = clip.col + durCols;
+  state.placedClips.forEach(c => {
+    if (c.id === clipId || c.laneIdx === clip.laneIdx) return;
+    const cBrick = getBrickById(c.brickId);
+    const cEnd = c.col + Math.ceil(cBrick.durSec);
+    if (clip.col < cEnd && clipEnd > c.col) {
+      c.el.classList.add('gold-overlap');
+      setTimeout(() => c.el.classList.remove('gold-overlap'), 2000);
+    }
+  });
+}
+
+function overlapsWithClip(clipIdA, clipIdB) {
+  const a = getClipById(clipIdA);
+  const b = getClipById(clipIdB);
+  if (!a || !b) return false;
+  const aEnd = a.col + Math.ceil(getBrickById(a.brickId).durSec);
+  const bEnd = b.col + Math.ceil(getBrickById(b.brickId).durSec);
+  return a.col < bEnd && aEnd > b.col;
+}
+
+// ── REPOSITION CLIP ──────────────────────────────────────────────
+function repositionClip(clipId, newCol, fromUndo) {
+  const clip = getClipById(clipId);
+  if (!clip) return;
+  const brick = getBrickById(clip.brickId);
+  const oldCol = clip.col;
+
+  clip.col = newCol;
+  clip.el.style.left = `${newCol * COL_W + 2}px`;
+  clip.el.style.opacity = '1';
+  clip.el.setAttribute('aria-label',
+    `Clip: ${brick.name}, ${brick.durSec}s, ${LANE_META[clip.laneIdx].label}, column ${newCol}`);
+
+  announce(`${brick.name} moved to column ${newCol}`);
+
+  if (state.firstPlayOccurred && !state.clipsMovedAfterPlay.has(clipId)) {
+    state.clipsMovedAfterPlay.add(clipId);
+    state.p2Count++;
+    if (!state.p2Met) {
+      state.p2Met = true;
+      console.log('[GATE] P2 MET — clip moved after first playback');
+    }
+    if (!state.nudgeMoveShown) {
+      state.nudgeMoveShown = true;
+      showNudge('Moved — hit Play to hear it');
+    }
+  }
+
+  // Undo record (#10)
+  if (!fromUndo) {
+    state.lastAction = { type: 'move', clipId, oldCol, newCol };
+  }
+
+  updateMetrics();
+  updateSongDur();
+}
+
+// ── REMOVE CLIP ──────────────────────────────────────────────────
+function removeClip(clipId, fromUndo) {
+  const clip = getClipById(clipId);
+  if (!clip) return;
+  const brick = getBrickById(clip.brickId);
+
+  // Undo record (#10)
+  if (!fromUndo) {
+    state.lastAction = { type: 'delete', id: clip.id, brickId: clip.brickId, laneIdx: clip.laneIdx, col: clip.col };
+  }
+
+  clip.el.remove();
+  state.placedClips = state.placedClips.filter(c => c.id !== clipId);
+  announce(`${brick.name} removed`);
+
+  if (!fromUndo) {
+    showNudge(`Removed ${brick.name} · Undo (Ctrl/Cmd+Z)`, 3000);
+  }
+
+  updateMetrics();
+  updateSongDur();
+
+  if (state.placedClips.length === 0) {
+    hideCoachLine();
+    state.coachDropShown = false;
+    state.firstDropDone = false;
+    $emptyHint.classList.remove('hidden');
+    document.querySelectorAll('.brick-card').forEach((c, i) => {
+      if (i === 0) c.classList.add('first-card-cue');
+    });
+  }
+}
+
+// ── UNDO (#10) ───────────────────────────────────────────────────
+function undo() {
+  const action = state.lastAction;
+  if (!action) { announce('Nothing to undo'); return; }
+  state.lastAction = null;
+
+  if (action.type === 'place') {
+    removeClip(action.id, true);
+    announce(`Undone: removed ${getBrickById(action.brickId).name}`);
+    showNudge(`Undone`, 2000);
+  } else if (action.type === 'move') {
+    repositionClip(action.clipId, action.oldCol, true);
+    const clip = getClipById(action.clipId);
+    const name = clip ? getBrickById(clip.brickId).name : 'clip';
+    announce(`Undone: moved ${name} back to column ${action.oldCol}`);
+    showNudge(`Undone`, 2000);
+  } else if (action.type === 'delete') {
+    // Re-place with same id
+    placeClip(action.brickId, action.laneIdx, action.col, action.id);
+    announce(`Undone: restored ${getBrickById(action.brickId).name}`);
+    showNudge(`Undone`, 2000);
+  }
+}
+
+function updateSongDur() {
+  let maxEnd = 0;
+  state.placedClips.forEach(c => {
+    const brick = getBrickById(c.brickId);
+    maxEnd = Math.max(maxEnd, c.col + brick.durSec);
+  });
+  state.songDurSec = maxEnd;
+}
+
+// ── KEYBOARD PLACEMENT (A11Y fallback) ──────────────────────────
+// #1: Enter-only for card selection; Space triggers play globally
+function onTrayKeyDown(e) {
+  const card = e.currentTarget;
+  const brickId = card.dataset.brickId;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Toggle select
+    if (state.keySelected === brickId) {
+      state.keySelected = null;
+      clearTrayKeySelect();
+      document.body.classList.remove('key-selecting');
+      announce(`${getBrickById(brickId).name} deselected`);
+    } else {
+      state.keySelected = brickId;
+      clearTrayKeySelect();
+      card.classList.add('selected-key');
+      card.setAttribute('aria-pressed', 'true');
+      document.body.classList.add('key-selecting');
+      announce(`${getBrickById(brickId).name} selected — press 1, 2 or 3 to place on a row`);
+    }
+  } else if (['1','2','3'].includes(e.key) && state.keySelected) {
+    e.preventDefault();
+    const laneIdx = parseInt(e.key) - 1;
+    placeKeySelected(laneIdx);
+  }
+  // Space intentionally not handled here — falls through to global handler
+}
+
+function placeKeySelected(laneIdx) {
+  const brickId = state.keySelected;
+  if (!brickId) return;
+  markFirstInteraction();
+  const brick = getBrickById(brickId);
+  const durCols = Math.ceil(brick.durSec);
+
+  // Find first free column in lane
+  let col = 0;
+  let attempts = 0;
+  while (checkSameLaneOverlap(laneIdx, col, durCols, null) && attempts < NUM_COLS) {
+    col++;
+    attempts++;
+  }
+  if (attempts >= NUM_COLS) {
+    announce(`${LANE_META[laneIdx].label} is full. Try a different row.`);
+    // #9: aria-live on refused keyboard placement
+    return;
+  }
+
+  // #9: announce if auto-shifted from col 0
+  if (col > 0) {
+    announce(`${brick.name} shifted to column ${col} — earlier columns were taken`);
+  }
+
+  clearTrayKeySelect();
+  document.body.classList.remove('key-selecting');
+  state.keySelected = null;
+  placeClip(brickId, laneIdx, col);
+}
+
+function clearTrayKeySelect() {
+  document.querySelectorAll('.brick-card').forEach(c => {
+    c.classList.remove('selected-key');
+    c.setAttribute('aria-pressed', 'false');
+  });
+}
+
+// ── GLOBAL KEYBOARD HANDLER ──────────────────────────────────────
+function wireKeyboard() {
+  document.addEventListener('keydown', e => {
+    // #1: Space triggers play unless focus is in INPUT/TEXTAREA
+    if (e.key === ' ' && !isInputFocused()) {
+      // If a brick card is focused, Space must NOT select it — only pass through to play
+      // (Enter is the select key for cards, so Space is safe to claim globally)
+      e.preventDefault();
+      togglePlay();
+      return;
+    }
+    // #10: Undo with Cmd/Ctrl+Z
+    if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !isInputFocused()) {
+      e.preventDefault();
+      undo();
+      return;
+    }
+    // 1/2/3 global placement when a brick is key-selected and focus is on card
+    if (['1','2','3'].includes(e.key) && state.keySelected &&
+        document.activeElement && document.activeElement.classList.contains('brick-card')) {
+      // handled in onTrayKeyDown via bubbling from card; no duplicate action needed
+    }
+  });
+}
+
+// Clip keyboard: arrow nudge + delete
+function onClipKeyDown(e, clipId) {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const clip = getClipById(clipId);
+    if (!clip) return;
+    const brick = getBrickById(clip.brickId);
+    const durCols = Math.ceil(brick.durSec);
+    let newCol = clip.col + (e.key === 'ArrowRight' ? 1 : -1);
+    newCol = Math.max(0, Math.min(NUM_COLS - durCols, newCol));
+    if (!checkSameLaneOverlap(clip.laneIdx, newCol, durCols, clipId)) {
+      repositionClip(clipId, newCol);
+    } else {
+      // #9: aria-live when keyboard movement is blocked
+      announce("Can't move there — another clip is in the way");
+    }
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    removeClip(clipId);
+  }
+}
+
+// ── TOOLTIP ──────────────────────────────────────────────────────
+function showTooltip(x, y, msg, type) {
+  $tooltip.textContent = msg;
+  $tooltip.className = `tooltip-tag ${type || ''}`;
+  $tooltip.setAttribute('aria-hidden', 'false');
+  $tooltip.style.display = 'block';
+  $tooltip.style.left = `${Math.min(x, window.innerWidth - 260)}px`;
+  $tooltip.style.top  = `${Math.max(8, y)}px`;
+}
+function hideTooltip() {
+  $tooltip.style.display = 'none';
+  $tooltip.setAttribute('aria-hidden', 'true');
+}
+
+// ── TRANSPORT ────────────────────────────────────────────────────
+function wireTransport() {
+  $btnPlay.addEventListener('click', togglePlay);
+  $btnRewind.addEventListener('click', rewind);
+}
+
+function togglePlay() {
+  if (state.isPlaying) {
+    stopPlay();
+  } else {
+    startPlay();
+  }
+}
+
+async function ensureAudioCtx() {
+  if (!state.audioCtx) {
+    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // #16: create master GainNode once
+    state.masterGain = state.audioCtx.createGain();
+    state.masterGain.gain.value = 1;
+    state.masterGain.connect(state.audioCtx.destination);
+  }
+  if (state.audioCtx.state === 'suspended') {
+    await state.audioCtx.resume();
+  }
+}
+
+// #19: idempotent startPlay — tear down live nodes first
+async function startPlay() {
+  if (state.placedClips.length === 0) {
+    showNudge('Drop a brick onto a row first!');
+    return;
+  }
+
+  // Tear down any live nodes from a previous run
+  if (state.isPlaying) {
+    stopPlay();
+    // Brief pause so nodes can settle
+    await new Promise(r => setTimeout(r, 30));
+  } else if (state.scheduledNodes.length > 0) {
+    state.scheduledNodes.forEach(n => { try { n.stop(0); } catch(_) {} });
+    state.scheduledNodes = [];
+  }
+
+  markFirstInteraction();
+  await ensureAudioCtx();
+
+  state.isPlaying = true;
+  $btnPlay.classList.add('stop-mode');
+  $btnPlay.setAttribute('aria-label', 'Stop');
+  $btnPlay.textContent = '■';
+
+  // #16: reset master gain
+  state.masterGain.gain.cancelScheduledValues(state.audioCtx.currentTime);
+  state.masterGain.gain.setValueAtTime(1, state.audioCtx.currentTime);
+
+  state.playStartCtxTime = state.audioCtx.currentTime;
+  state.playStartMs = Date.now();
+  state.scheduledNodes = [];
+
+  scheduleAllClips();
+  startPlayheadAnim();
+
+  if (!state.firstPlayOccurred) {
+    state.firstPlayOccurred = true;
+  }
+
+  // P1 audible gate: audioCtx must be running (not suspended/blocked by autoplay policy)
+  // AND the scheduler must have found >=2 clips from >=2 different lanes overlapping in time.
+  if (!state.p1Met &&
+      state.audioCtx && state.audioCtx.state === 'running' &&
+      state._lastScheduleHadAudibleOverlap) {
+    markP1Met();
+  }
+
+  const dur = Math.max(state.songDurSec, 0.5);
+  state._autoStopTimeout = setTimeout(() => {
+    if (state.isPlaying) stopPlay();
+  }, dur * 1000 + 300);
+
+  announce('Playing');
+
+  if (!state.nudgePostPlayShown) {
+    state.nudgePostPlayShown = true;
+    setTimeout(() => {
+      if (!state.isPlaying) return;
+      showNudge('Heard it? Try dragging a brick sideways to change when it comes in', 4500);
+    }, Math.max(dur * 1000, 800));
+  }
+}
+
+function stopPlay() {
+  state.isPlaying = false;
+  $btnPlay.classList.remove('stop-mode', 'pulse-once');
+  $btnPlay.setAttribute('aria-label', 'Play');
+  $btnPlay.textContent = '▶';
+  $btnPlay.title = 'Play (Space)';
+
+  clearTimeout(state._autoStopTimeout);
+  cancelAnimationFrame(state.playheadRaf);
+
+  // #16: ramp master gain to 0 (20ms anti-click), then stop nodes
+  if (state.audioCtx && state.masterGain) {
+    const ctx = state.audioCtx;
+    state.masterGain.gain.cancelScheduledValues(ctx.currentTime);
+    state.masterGain.gain.setValueAtTime(state.masterGain.gain.value, ctx.currentTime);
+    state.masterGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.02);
+    state.scheduledNodes.forEach(n => {
+      try { n.stop(ctx.currentTime + 0.025); } catch(_) {}
+    });
+    state.scheduledNodes = [];
+  }
+
+  // #12: clear playing-now highlights
+  state.placedClips.forEach(c => c.el.classList.remove('playing-now'));
+  $nowPlaying.textContent = '';
+  $nowPlaying.classList.remove('visible');
+
+  $playhead.style.transform = 'translateX(0)';
+  $elapsed.textContent = '0:00.0';
+
+  announce('Stopped');
+}
+
+function rewind() {
+  stopPlay();
+  $playhead.style.transform = 'translateX(0)';
+  $elapsed.textContent = '0:00.0';
+  announce('Rewound to start');
+}
+
+// ── AUDIO SCHEDULER ─────────────────────────────────────────────
+function scheduleAllClips() {
+  const ctx = state.audioCtx;
+  const baseTime = state.playStartCtxTime;
+
+  state.placedClips.forEach(clip => {
+    const brick = getBrickById(clip.brickId);
+    const clipStartSec = clip.col;
+
+    brick.notes.forEach(note => {
+      const absTime = baseTime + clipStartSec + note.t;
+      if (absTime < ctx.currentTime - 0.01) return;
+      scheduleNote(ctx, brick.preset, note.m, absTime, note.d);
+    });
+  });
+
+  // Record whether this scheduling pass actually has >=2 clips from >=2 different
+  // lanes that overlap in time — used by the P1 audible-gate check in startPlay().
+  state._lastScheduleHadAudibleOverlap = computeScheduledAudibleOverlap();
+}
+
+function scheduleNote(ctx, preset, midi, startTime, durSec) {
+  switch (preset) {
+    case 'drums':  scheduleDrum(ctx, midi, startTime);                break;
+    case 'bass':   scheduleTonal(ctx, midi, startTime, durSec, 'bass');   break;
+    case 'melody': scheduleTonal(ctx, midi, startTime, durSec, 'melody'); break;
+    case 'chords': scheduleTonal(ctx, midi, startTime, durSec, 'chords'); break;
+    case 'arp':    scheduleTonal(ctx, midi, startTime, durSec, 'arp');    break;
+  }
+}
+
+// ── DRUM SYNTHESIS ──────────────────────────────────────────────
+function scheduleDrum(ctx, midi, startTime) {
+  const pc = midi % 12;
+  if (pc === 0 || pc === 7) {
+    scheduleKick(ctx, startTime);
+  } else if (pc === 2 || pc === 9) {
+    scheduleSnare(ctx, startTime);
+  } else {
+    scheduleHat(ctx, startTime);
+  }
+}
+
+function scheduleKick(ctx, t) {
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  // #16: route through master gain
+  gain.connect(state.masterGain);
+
+  osc.frequency.setValueAtTime(150, t);
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.linearRampToValueAtTime(0.7, t + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+
+  osc.start(t);
+  osc.stop(t + 0.3);
+  state.scheduledNodes.push(osc);
+}
+
+function scheduleSnare(ctx, t) {
+  const bufferSize = ctx.sampleRate * 0.2;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 1200;
+
+  const gain = ctx.createGain();
+  source.connect(hp);
+  hp.connect(gain);
+  gain.connect(state.masterGain);
+
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.linearRampToValueAtTime(0.35, t + 0.003);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+
+  source.start(t);
+  source.stop(t + 0.2);
+  state.scheduledNodes.push(source);
+
+  const osc = ctx.createOscillator();
+  const og  = ctx.createGain();
+  osc.connect(og);
+  og.connect(state.masterGain);
+  osc.frequency.value = 200;
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.linearRampToValueAtTime(0.25, t + 0.003);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  osc.start(t);
+  osc.stop(t + 0.15);
+  state.scheduledNodes.push(osc);
+}
+
+function scheduleHat(ctx, t) {
+  const bufferSize = ctx.sampleRate * 0.05;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 7000;
+  const gain = ctx.createGain();
+  source.connect(hp);
+  hp.connect(gain);
+  gain.connect(state.masterGain);
+
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.linearRampToValueAtTime(0.18, t + 0.001);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+
+  source.start(t);
+  source.stop(t + 0.055);
+  state.scheduledNodes.push(source);
+}
+
+// ── TONAL SYNTHESIS ─────────────────────────────────────────────
+function scheduleTonal(ctx, midi, startTime, durSec, preset) {
+  const freq = midiToFreq(midi);
+
+  let a = 0.01, d = 0.1, s = 0.7, r = 0.15, vol = 0.18;
+
+  if (preset === 'bass') {
+    a = 0.02; d = 0.05; s = 0.8; r = 0.1; vol = 0.22;
+  } else if (preset === 'melody') {
+    a = 0.02; d = 0.08; s = 0.65; r = 0.12; vol = 0.15;
+  } else if (preset === 'chords') {
+    a = 0.04; d = 0.1; s = 0.6; r = 0.25; vol = 0.10;
+  } else if (preset === 'arp') {
+    a = 0.005; d = 0.05; s = 0.3; r = 0.06; vol = 0.14;
+  }
+
+  const gain = ctx.createGain();
+  // #16: route through master gain
+  gain.connect(state.masterGain);
+
+  const noteEnd = startTime + durSec;
+  const releaseStart = noteEnd;
+  const fullEnd = releaseStart + r;
+
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.linearRampToValueAtTime(vol, startTime + a);
+  gain.gain.linearRampToValueAtTime(vol * s, startTime + a + d);
+  gain.gain.setValueAtTime(vol * s, releaseStart);
+  gain.gain.linearRampToValueAtTime(0.0001, fullEnd);
+
+  if (preset === 'bass') {
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = freq;
+    osc1.connect(gain);
+    osc1.start(startTime);
+    osc1.stop(fullEnd + 0.01);
+    state.scheduledNodes.push(osc1);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.value = freq;
+    const g2 = ctx.createGain();
+    g2.gain.value = 0.4;
+    osc2.connect(g2);
+    g2.connect(state.masterGain);
+    osc2.start(startTime);
+    osc2.stop(fullEnd + 0.01);
+    state.scheduledNodes.push(osc2);
+
+  } else if (preset === 'melody') {
+    [1, 2, 3].forEach((harmonic, idx) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * harmonic;
+      const hg = ctx.createGain();
+      hg.gain.value = [0.6, 0.3, 0.1][idx];
+      osc.connect(hg);
+      hg.connect(gain);
+      osc.start(startTime);
+      osc.stop(fullEnd + 0.01);
+      state.scheduledNodes.push(osc);
+    });
+
+  } else if (preset === 'chords') {
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    lp.Q.value = 0.5;
+    lp.connect(gain);
+
+    [-4, 0, 4].forEach(detune => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      osc.detune.value = detune;
+      osc.connect(lp);
+      osc.start(startTime);
+      osc.stop(fullEnd + 0.01);
+      state.scheduledNodes.push(osc);
+    });
+
+  } else if (preset === 'arp') {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    osc.start(startTime);
+    osc.stop(fullEnd + 0.01);
+    state.scheduledNodes.push(osc);
+
+  } else {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    osc.start(startTime);
+    osc.stop(fullEnd + 0.01);
+    state.scheduledNodes.push(osc);
+  }
+}
+
+// ── PLAYHEAD ANIMATION + NOW PLAYING (#12) ──────────────────────
+function startPlayheadAnim() {
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const totalW = NUM_COLS * COL_W;
+
+  function frame() {
+    if (!state.isPlaying) return;
+    const ctx = state.audioCtx;
+    const elapsed = ctx.currentTime - state.playStartCtxTime;
+    const x = Math.min(elapsed * COL_W, totalW);
+    const ms = Math.floor(elapsed * 1000);
+
+    if (prefersReduced) {
+      const stepSec = 0.5;
+      const stepped = Math.floor(elapsed / stepSec) * stepSec;
+      $playhead.style.transform = `translateX(${Math.min(stepped * COL_W, totalW)}px)`;
+    } else {
+      $playhead.style.transform = `translateX(${x}px)`;
+    }
+
+    $elapsed.textContent = formatTime(ms);
+
+    // #12: highlight clips under playhead + "Now playing" readout
+    const playingNames = [];
+    state.placedClips.forEach(c => {
+      const brick = getBrickById(c.brickId);
+      const clipStart = c.col;
+      const clipEnd = c.col + brick.durSec;
+      if (elapsed >= clipStart && elapsed < clipEnd) {
+        c.el.classList.add('playing-now');
+        playingNames.push(brick.name);
+      } else {
+        c.el.classList.remove('playing-now');
+      }
+    });
+    if (playingNames.length > 0) {
+      $nowPlaying.textContent = 'Now playing: ' + playingNames.join(' + ');
+      $nowPlaying.classList.add('visible');
+    } else {
+      $nowPlaying.textContent = '';
+      $nowPlaying.classList.remove('visible');
+    }
+
+    state.playheadRaf = requestAnimationFrame(frame);
+  }
+  state.playheadRaf = requestAnimationFrame(frame);
+}
+
+// ── METRICS PANEL TOGGLE ─────────────────────────────────────────
+function wireMetricsPanel() {
+  const body   = document.getElementById('metrics-body');
+  const toggle = document.getElementById('metrics-toggle');
+
+  // #18: only the toggle button is interactive; header is plain div
+  function doToggle() {
+    const isCollapsed = body.classList.toggle('collapsed');
+    toggle.textContent = isCollapsed ? '▼' : '▲';
+    toggle.setAttribute('aria-expanded', String(!isCollapsed));
+    toggle.setAttribute('aria-label', isCollapsed ? 'Expand metrics panel' : 'Collapse metrics panel');
+  }
+
+  toggle.addEventListener('click', doToggle);
+  // Keyboard on the toggle button is handled natively (Enter/Space on button)
+
+  // Want-tag radio simulation
+  document.querySelectorAll('.want-tag').forEach(span => {
+    span.parentElement.addEventListener('click', () => {
+      document.querySelectorAll('.want-tag').forEach(s => {
+        s.style.background = '';
+        s.style.borderColor = '';
+        s.style.color = '';
+      });
+      span.style.background = 'var(--accent-dim)';
+      span.style.borderColor = 'var(--accent)';
+      span.style.color = 'var(--text-primary)';
+    });
+  });
+
+  $copyBtn.addEventListener('click', () => {
+    const json = buildSessionJson();
+    navigator.clipboard.writeText(JSON.stringify(json, null, 2))
+      .then(() => {
+        $copyBtn.textContent = 'Copied!';
+        setTimeout(() => { $copyBtn.textContent = 'Copy session JSON'; }, 2000);
+      })
+      .catch(() => {
+        $copyBtn.textContent = 'Copy failed (use Download)';
+        setTimeout(() => { $copyBtn.textContent = 'Copy session JSON'; }, 3000);
+      });
+    console.log('[SESSION JSON]', json);
+  });
+
+  $dlBtn.addEventListener('click', () => {
+    const json = buildSessionJson();
+    const blob = new Blob([JSON.stringify(json, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `poc004-session-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+function getSelectedWantTag() {
+  const inputs = document.querySelectorAll('input[name="want-tag"]');
+  for (const inp of inputs) {
+    if (inp.checked) return inp.value;
+  }
+  return null;
+}
+
+function buildSessionJson() {
+  const now = Date.now();
+  const sessionElapsed = now - state.pageLoadMs;
+  return {
+    prototype: 'POC-004 Brick Stack',
+    sessionTimestamp: new Date().toISOString(),
+    timings: {
+      pageLoadMs: state.pageLoadMs,
+      firstInteractionMs: state.firstInteractionMs,
+      timeToFirstInteractionMs: state.firstInteractionMs
+        ? state.firstInteractionMs - state.pageLoadMs : null,
+      sessionElapsedMs: sessionElapsed,
+    },
+    gates: {
+      P1_firstCombinedPlayback: state.p1Met
+        ? { met: true, elapsedFromPageLoadMs: state.firstCombinedPlayMs, formatted: formatTime(state.firstCombinedPlayMs) }
+        : { met: false, elapsedMs: sessionElapsed },
+      P2_movedAfterFirstPlay: { met: state.p2Met, count: state.p2Count },
+      P3_under5min: { met: state.p1Met && !state.p3Violated, p3Violated: state.p3Violated },
+    },
+    placement: {
+      totalClips: state.placedClips.length,
+      perRow: [0,1,2].map(i => state.placedClips.filter(c => c.laneIdx === i).length),
+      clips: state.placedClips.map(c => ({
+        brickId: c.brickId,
+        laneIdx: c.laneIdx,
+        col: c.col,
+      })),
+    },
+    wantProbe: {
+      verbatim: $wantInput.value,
+      quickTag: getSelectedWantTag(),
+    },
+  };
+}
+
+// ── BOOT ────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

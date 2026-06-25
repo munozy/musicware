@@ -171,9 +171,13 @@ support:
 - Playing back the arrangement and hearing the Compositions play together (or simulating audio)
 - Moving a clip to a different position
 
-Song-structure templates (Electronic/Rock/Cinematic from PRD-004 US-21) should be included in
-the prototype: they are the primary progressive-disclosure mechanism for blank-canvas
-disorientation, and their learnability is a direct part of OQ-3.
+Song-structure templates (Electronic/Rock/Cinematic from PRD-004 US-21) are the primary
+progressive-disclosure mechanism for blank-canvas disorientation. **They were DESCOPED from the
+POC-004 prototype run** (recorded in POC-004 + the prototype README): testing the blank canvas AND
+templates in the same session would muddy the P1 signal. **Consequence:** this Gate A run tests the
+**blank-canvas case only**; **template-learnability — PRD-004's #1 blank-canvas mitigation — is NOT
+validated here** and is deferred to a follow-up **POC-004b** (an A/B: blank vs template-seeded). A
+Gate A pass must **not** be read as validating the template mitigation.
 
 ### OQ-3 — Observable signal definition
 
@@ -211,7 +215,7 @@ a diff-guard).
 
 | # | Criterion | Weight | Observable evidence |
 |---|---|---|---|
-| P1 | Task completion without verbal help | **binding** | The participant reaches first-combined-playback (≥2 clips, ≥2 tracks) without receiving any instruction beyond the initial brief |
+| P1 | Task completion without verbal help | **binding** | The participant reaches **audible** first-combined-playback (≥2 overlapping bricks actually *sounding*, audio context running — not merely a combinable layout + pressing play) without instruction beyond the initial brief |
 | P2 | Edit after first playback | **binding** | The participant moves, trims, or repositions at least one clip after hearing the arrangement — evidence the loop is informing a decision, not just verifying the feature |
 | P3 | Time-to-first-combined-playback | **binding** | The participant reaches first-combined-playback in under 5 minutes from opening the prototype |
 | P4 | Qualitative engagement signal | corroboration | The participant makes an unprompted comment indicating the loop feels inviting or that they want to continue adding to the arrangement |
@@ -219,6 +223,13 @@ a diff-guard).
 If **P1, P2, and P3 are all met** (P4 corroborates): the arrangement UX is learnable; proceed to
 the full Solution A build (PRD-004 V1). Assign DEBT-025 as resolved. The PRD-004 work items
 (US-1 through US-26) are unblocked. P4 alone, without P1–P3, does not open Gate A.
+
+> **Precondition for recording a Gate A pass (enforces DEBT-030).** Record the participant count.
+> If **n=1 (solo developer)**, flag the self-observation caveat explicitly and raise the qualitative
+> bar (recall first-time confusion honestly) — a single self-administered session does **not** on its
+> own unblock US-1..US-26; recruit ≥1 external beginner, or carry the n=1 limitation into the build
+> decision. And note that a pass validates the blank-canvas UX only, **not** the template mitigation
+> (deferred to POC-004b, §4).
 
 **The headline signal remains** the same as PRD-004's: an observed "moved a clip after hearing
 it" moment (P2). That is the difference between "the arrangement plays back" and "the arrangement
@@ -340,8 +351,9 @@ primary scheduling variable.
 
 - **Prototype build (pre-session):** construct the arrangement workspace prototype per DESIGN-002's
   Tier 1 progressive-disclosure model. Pre-load 4–5 Compositions (representative bricks: one
-  short dense phrase, one sparse melody, one drum groove, one long sustained note). Include the
-  song-structure template picker (at minimum the Electronic template).
+  short dense phrase, one sparse melody, one drum groove, one long sustained note). **Templates are
+  DESCOPED from this run** (see §4) — the prototype tests the blank canvas; template-learnability is
+  deferred to POC-004b.
 - **Session (60–90 minutes):** brief the participant, observe task attempt (no instruction), run
   the think-aloud, fill in P1/P2/P3 observations in real time.
 - **Retrospective (15 minutes, immediately after):** run prompts P-R1 through P-R6.
