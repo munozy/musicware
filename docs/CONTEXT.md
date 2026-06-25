@@ -8,7 +8,7 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 
 ## Core domain terms
 
-- **Track** — A single recordable/playable lane of audio (e.g. one microphone input or one imported file). Has per-track controls (gain, pan). The MVP targets 4 mono tracks.
+- **Track** — *(original PRD-001 sense)* A single recordable/playable lane of audio (e.g. one microphone input or one imported file). Has per-track controls (gain, pan). The MVP targeted 4 mono tracks. The first concrete Track concept actually built is the **Arrangement track** (see Arrangement terms) — disambiguate the two when both are in play.
 - **Clip** — A bounded piece of audio placed on a track at a position on the timeline. A track holds zero or more clips.
 - **Region** — A selected span of the timeline (start/end), independent of clips. Used to define what plays, what exports, and what loops.
 - **Loop** — A region marked to repeat continuously during playback. The MVP targets looping a 4-bar region.
@@ -47,6 +47,24 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Recording** — A saved take: a named, timestamped stream of the UI's note/preset events, captured at the synth dispatch choke point and persisted to `localStorage` (ADR-0002). Symbolic events, **not** audio.
 - **Take** — One captured performance from record-start to stop — the unit a Recording holds. Held notes are auto-closed at stop so a take is self-contained; an empty take (no note-ons) is discarded.
 - **Replay** — Playing back a Recording by re-dispatching its events to the engine on a schedule (ADR-0002). Uses the same dispatch path as live play, so it sounds the same and lights the same keys.
+
+## Arrangement terms
+
+> Added 2026-06-25 from [PRD-004](product/prds/PRD-004-song-arrangement.md) + [ADR-0007](architecture/decisions/ADR-0007-song-arrangement-symbolic-timeline.md) (Song Arrangement workspace). A *symbolic* multi-track timeline that reuses the existing engine — it schedules clip events into the same `emit()` path as replay; **no audio mixdown, no DSP graph in V1**. The reusable AI layer that proposes arrangements is documented in [docs/agents/moonozy-music](agents/moonozy-music/README.md).
+
+- **Arrangement** — The whole song project: tracks, clip instances, section markers, and song metadata (tempo, time signature). UI-owned and persisted to `localStorage` (`musicware.arrangements.v1`), like Recordings. Symbolic, not audio.
+- **Song mode** — The arrangement workspace view; the complement to **Play mode** (the keyboard/stage). The top-bar toggle `[ Play | Song ]` switches between them (DESIGN-002). The recommended product name for the workspace is **"Song"**.
+- **Arrangement track** — A horizontal timeline lane holding zero or more clip instances, mapped to one instrument/timbre (`presetIndex`). Has header controls: name, colour, mute, solo (V1); volume, pan (later). Distinct from the audio-input **Track** above.
+- **Clip instance** — An instance of a **Recording** placed on an arrangement track at a start time, with its own `transpose`, `loopCount`, and optional trim. It **references** the Recording by id and never copies its events (ADR-0007). The timeline unit the user drags, moves, loops, and splits.
+- **Section / Section marker** — A named, coloured span over the timeline ruler (Intro, Verse, Chorus, Drop, Climax…). A **visual navigation guide for song structure**; it does not itself gate playback.
+- **Song-structure template** — A preset set of section markers at conventional positions for a genre — Electronic (Intro/Build-up/Drop/Breakdown/Outro), Rock (Intro/Verse/Chorus/Bridge/Solo/Outro), Cinematic (Intro/Tension/Climax/Resolution). Applied to a new arrangement to cure the blank-canvas problem (PRD-004's #1 usability mitigation).
+- **Tempo / time signature** — The song's speed in beats per minute and its beats-per-bar (default 120 BPM, 4/4). Governs the bar/beat ruler grid, snapping, and quantize.
+- **Arrangement scheduler (Song transport)** — The UI-side module that, during arrangement playback, converts each active clip instance's events to wall-clock offsets (applying transpose/loop/trim) and dispatches the merged, time-ordered stream into the engine via `emit()` — a generalised, multi-clip version of replay (ADR-0007). The dominant V1 feasibility item (gate KA-1).
+- **Transpose** — Shifting a clip instance's notes up/down by a number of semitones at schedule time, so a clip recorded in one key fits the song's key. Applied to note events only; drums are unaffected.
+- **Snap / Quantize** — *Snap*: while dragging, a clip's start jumps to the nearest grid line (bar/beat). *Quantize*: nudging an already-placed clip's start onto the grid. Both are grid operations on clip positions, not on the notes inside a clip.
+- **Mix / DSP graph** *(later — gated)* — A future per-track gain → pan → bus → master signal chain with insert effects, running alloc-free on the real-time thread. Required before per-track volume/pan, EQ, reverb, compressor, sends and buses are real (ADR-0007 phased V2a→V2c). Absent in V1.
+- **Bus / Send** *(later)* — A bus sums several tracks for shared processing; a send routes a portion of a track to a bus (e.g. a shared reverb). Reserved in the data model, inert in V1.
+- **Automation lane** *(later)* — A per-track, per-parameter curve over time (volume, pan, filter cutoff, reverb/delay amount, any future parameter) drawn under a track. Reserved in the data model, inert in V1.
 
 ## Architecture terms
 
