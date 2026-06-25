@@ -8,6 +8,7 @@ const PRESETS = [
   { index: 2, label: "Piano" },
   { index: 3, label: "Bells" },
   { index: 4, label: "Drums" },
+  { index: 5, label: "Theremin" },
 ];
 
 /**
