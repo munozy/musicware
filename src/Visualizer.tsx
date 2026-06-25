@@ -30,8 +30,15 @@ function Visualizer({ style }: { style: VizStyle }) {
     let raf = 0;
     let phase = 0;
     let amp = 0; // eased global amplitude 0..1
+    let lastStyle = styleRef.current;
     const BARS = 40;
     const barHeights = new Float32Array(BARS);
+    // Respect reduced-motion: no continuous animation (phase frozen) — the shape
+    // still updates when the notes change, it just doesn't oscillate (WCAG 2.3.3).
+    const reduceMotion =
+      typeof window !== "undefined" && typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        : false;
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -87,7 +94,10 @@ function Visualizer({ style }: { style: VizStyle }) {
         const x = i * (bw + gap);
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.roundRect?.(x, h - bh, bw, bh, 3);
+        // roundRect is unsupported on older WKWebView — fall back to a plain rect
+        // so Bars never renders blank.
+        if (ctx.roundRect) ctx.roundRect(x, h - bh, bw, bh, 3);
+        else ctx.rect(x, h - bh, bw, bh);
         ctx.fill();
       }
     };
@@ -123,8 +133,17 @@ function Visualizer({ style }: { style: VizStyle }) {
       const h = canvas.clientHeight || 200;
       const notes = notesRef.current;
       const playing = notes.length > 0;
-      amp += ((playing ? 1 : 0.16) - amp) * 0.08;
-      phase += playing ? 0.08 : 0.02;
+      // Reset the eased bar heights when (re)entering Bars so it starts clean.
+      if (styleRef.current !== lastStyle) {
+        if (styleRef.current === "bars") barHeights.fill(0);
+        lastStyle = styleRef.current;
+      }
+      if (reduceMotion) {
+        amp = playing ? 1 : 0.16; // snap, no easing; phase stays frozen
+      } else {
+        amp += ((playing ? 1 : 0.16) - amp) * 0.08;
+        phase += playing ? 0.08 : 0.02;
+      }
 
       ctx.clearRect(0, 0, w, h);
       ctx.shadowBlur = playing ? 16 : 6;
