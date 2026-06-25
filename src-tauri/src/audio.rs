@@ -772,25 +772,14 @@ fn render_block(
         for v in voices.iter_mut() {
             if v.is_sounding() {
                 let env = step_env(v, &adsr_table[v.preset as usize]);
-                // Bell sums INHARMONIC partials, each on its own phase accumulator so
-                // a non-integer ratio causes no 2π-wrap discontinuity; bounded to
-                // [-1,1] by /BELL_NORM. Every other waveform takes the unchanged
-                // single-phase `eval_waveform` path (byte-identical).
-                let s = if waveform == Waveform::Bell {
-                    let mut acc = 0.0f32;
-                    for p in 0..BELL_PARTIALS {
-                        // Each partial's amplitude is its registration weight scaled by
-                        // its relative gain, so high partials thin out as the strike
-                        // settles into the hum (the bell's bright→pure decay).
-                        acc += BELL_AMPS[p] * v.bell_gain[p] * v.bell_phases[p].sin();
-                        v.bell_phases[p] += v.phase_delta * BELL_RATIOS[p];
-                        while v.bell_phases[p] >= TWO_PI {
-                            v.bell_phases[p] -= TWO_PI;
-                        }
-                        v.bell_gain[p] *= v.bell_decay[p]; // ≤ 1 → never grows
-                    }
-                    acc / BELL_NORM
-                } else if waveform == Waveform::Drums {
+                // Drums are dispatched per-VOICE (by the preset it was struck with),
+                // not by the live block waveform — a one-shot drum must keep decaying
+                // and self-free even if the user switches to another preset mid-tail
+                // (otherwise its branch is skipped and, with sustain 1 + note-off
+                // ignored, the voice strands and leaks a DC term). Bell + tonal
+                // waveforms stay GLOBAL (held notes re-timbre live, STORY-K4).
+                let voice_is_drum = PRESETS[v.preset as usize].waveform == Waveform::Drums;
+                let s = if voice_is_drum {
                     // Drum source (∈[-1,1]) shaped by the baked amplitude env; the env
                     // decays and, at its floor, frees the voice (drums ignore note-off).
                     let cls = (v.note % 12) as usize;
@@ -810,6 +799,23 @@ fn render_block(
                         v.stage = EnvStage::Idle;
                     }
                     out
+                } else if waveform == Waveform::Bell {
+                    // Bell sums INHARMONIC partials, each on its own phase accumulator
+                    // so a non-integer ratio causes no 2π-wrap discontinuity; bounded
+                    // to [-1,1] by /BELL_NORM.
+                    let mut acc = 0.0f32;
+                    for p in 0..BELL_PARTIALS {
+                        // Each partial's amplitude is its registration weight scaled by
+                        // its relative gain, so high partials thin out as the strike
+                        // settles into the hum (the bell's bright→pure decay).
+                        acc += BELL_AMPS[p] * v.bell_gain[p] * v.bell_phases[p].sin();
+                        v.bell_phases[p] += v.phase_delta * BELL_RATIOS[p];
+                        while v.bell_phases[p] >= TWO_PI {
+                            v.bell_phases[p] -= TWO_PI;
+                        }
+                        v.bell_gain[p] *= v.bell_decay[p]; // ≤ 1 → never grows
+                    }
+                    acc / BELL_NORM
                 } else {
                     eval_waveform(waveform, v.phase)
                 };
@@ -2102,13 +2108,15 @@ mod tests {
         );
     }
 
-    /// The drum render path is allocation-free (xorshift noise + sines, no heap).
+    /// The drum render path is allocation-free (xorshift noise + sines, no heap) —
+    /// across ALL 12 pitch classes (every `drum_source` arm: tones, snare/ride
+    /// tone+noise mix, cowbell square, bright-noise hats/crash/clap/rim).
     #[test]
     fn drum_render_does_not_allocate() {
         let sr = 44_100.0;
         let table = build_adsr_table(sr);
         let mut pool = VoicePool::new();
-        for note in 60u8..68 {
+        for note in 60u8..72 {
             apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
         }
         let mut buf = [0.0f32; 512];
@@ -2122,6 +2130,65 @@ mod tests {
                 &table,
             );
         });
+    }
+
+    /// Regression for the zombie-voice defect: a struck drum must keep decaying and
+    /// self-free even when the live block waveform is no longer Drums (user switched
+    /// preset mid-tail). Drums dispatch per-voice (by captured preset), so the voice
+    /// must still reach Idle and not strand a slot / leak a DC term.
+    #[test]
+    fn drum_voice_frees_after_preset_switch() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 61 }, sr, DRUMS); // rim (short τ)
+        assert_eq!(pool.sounding_count(), 1);
+        // Render with a NON-Drums live waveform (as if the user switched to Saw).
+        let mut buf = [0.0f32; 4096];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Saw,
+            &table,
+        );
+        assert_eq!(
+            pool.sounding_count(),
+            0,
+            "a drum voice must self-free even after a preset switch (no stranded slot / DC)"
+        );
+    }
+
+    /// Bright-noise drums (hats) are high-frequency-dominant — guards against a
+    /// future "tidy" silently dropping the high-pass that fixed the by-ear rejection.
+    /// A bright hat flips sign far more often than a low pitched drum (kick).
+    #[test]
+    fn drum_hat_is_brighter_than_kick() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let sign_changes = |note: u8| {
+            let mut pool = VoicePool::new();
+            apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
+            let mut buf = [0.0f32; 1024];
+            render_block(
+                &mut buf,
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                Waveform::Drums,
+                &table,
+            );
+            buf.windows(2)
+                .filter(|w| w[0].signum() != w[1].signum())
+                .count()
+        };
+        let hat = sign_changes(66); // F# closed hat (bright noise)
+        let kick = sign_changes(60); // C kick (low sine)
+        assert!(
+            hat > kick * 5,
+            "hat should be far brighter (more sign changes) than kick — hat={hat}, kick={kick}"
+        );
     }
 
     /// The piano preset's release reaches exact silence/Idle despite sustain == 0

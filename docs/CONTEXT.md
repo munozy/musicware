@@ -37,7 +37,9 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Envelope (ADSR)** — The per-voice amplitude shape over time: Attack, Decay, Sustain, Release. Ramps a note in/out so it doesn't click on note-on/note-off.
 - **Note event** — A **note-on** (start a pitch) or **note-off** (release it), issued by the UI and delivered to the real-time thread via the ring buffer. Drives voice allocation.
 - **Note number / pitch** — A note is identified by an integer note number; its frequency is `f = 440·2^((n−69)/12)` (A4 = 69 = 440 Hz). This is pitch math, **not** MIDI I/O.
-- **Preset** — A named timbre = a waveform + an envelope, selectable live (e.g. Sine / Organ / Piano). The waveform applies to all voices; each voice captures its envelope preset at note-on (STORY-K4).
+- **Preset** — A named timbre = a waveform + an envelope, selectable live (e.g. Sine / Organ / Piano / Bells / Drums). The waveform applies to all voices; each voice captures its envelope preset at note-on (STORY-K4).
+- **Drum kit** — The "Drums" preset: an *unpitched* percussion timbre where the note's **pitch class** (`note % 12`) selects a drum (kick, snare, hat, tom…) rather than a pitch. Synthesised from pitch-swept sines + bright (high-passed) noise (ADR-0005), not a tonal waveform.
+- **One-shot** — A voice that plays a fixed sound to completion and frees itself (ignoring note-off), rather than sustaining until key-up. Drums are one-shots: a hit rings out its baked decay regardless of how briefly the key is held.
 - **Recording** — A saved take: a named, timestamped stream of the UI's note/preset events, captured at the synth dispatch choke point and persisted to `localStorage` (ADR-0002). Symbolic events, **not** audio.
 - **Take** — One captured performance from record-start to stop — the unit a Recording holds. Held notes are auto-closed at stop so a take is self-contained; an empty take (no note-ons) is discarded.
 - **Replay** — Playing back a Recording by re-dispatching its events to the engine on a schedule (ADR-0002). Uses the same dispatch path as live play, so it sounds the same and lights the same keys.
