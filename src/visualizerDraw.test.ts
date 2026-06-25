@@ -22,7 +22,8 @@ function mockCtx({ roundRect = true } = {}) {
     closePath: () => void calls.closePath++,
     moveTo: (x: number, y: number) => void calls.moveTo.push([x, y]),
     lineTo: (x: number, y: number) => void calls.lineTo.push([x, y]),
-    rect: (x: number, y: number) => void calls.rect.push([x, y]),
+    // Capture ALL args so bad geometry (NaN/Infinity width or height) is caught.
+    rect: (x: number, y: number, w: number, h: number) => void calls.rect.push([x, y, w, h]),
     stroke: () => void calls.stroke++,
     fill: () => void calls.fill++,
     clearRect: () => void calls.clearRect++,
@@ -32,7 +33,9 @@ function mockCtx({ roundRect = true } = {}) {
     shadowBlur: 0,
     shadowColor: "",
   };
-  if (roundRect) ctx.roundRect = (x: number, y: number) => void calls.roundRect.push([x, y]);
+  if (roundRect)
+    ctx.roundRect = (x: number, y: number, w: number, h: number, r: number) =>
+      void calls.roundRect.push([x, y, w, h, r]);
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
 }
 
@@ -57,12 +60,18 @@ describe("visualizerDraw", () => {
     }
   });
 
-  it("bars fills one rounded rect per bar", () => {
+  it("bars fills one rounded rect per bar with finite, in-bounds geometry", () => {
     const { ctx, calls } = mockCtx();
     drawBars(ctx, W, H, [60, 64, 67], 1, 0.5, new Float32Array(BARS));
     expect(calls.roundRect.length).toBe(BARS);
     expect(calls.fill).toBe(BARS);
-    expect(finite(calls.roundRect)).toBe(true);
+    expect(finite(calls.roundRect)).toBe(true); // x, y, w, h, r all finite
+    for (const [x, y, w, h] of calls.roundRect) {
+      expect(w).toBeGreaterThan(0); // real width
+      expect(h).toBeGreaterThanOrEqual(0); // non-negative height
+      expect(y + h).toBeLessThanOrEqual(H + 0.001); // bottom-anchored, within canvas
+      expect(x).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it("bars falls back to rect() when roundRect is unavailable (older WKWebView)", () => {
@@ -82,18 +91,17 @@ describe("visualizerDraw", () => {
   });
 
   it("drawFrame clears and dispatches to the chosen style", () => {
-    const bh = new Float32Array(BARS);
     const scope = mockCtx();
-    drawFrame(scope.ctx, "scope", W, H, [60], 1, 1, bh);
+    drawFrame(scope.ctx, "scope", W, H, [60], 1, 1, new Float32Array(BARS));
     expect(scope.calls.clearRect).toBe(1);
     expect(scope.calls.stroke).toBe(1);
 
     const bars = mockCtx();
-    drawFrame(bars.ctx, "bars", W, H, [60], 1, 1, bh);
+    drawFrame(bars.ctx, "bars", W, H, [60], 1, 1, new Float32Array(BARS));
     expect(bars.calls.fill).toBe(BARS);
 
     const radial = mockCtx();
-    drawFrame(radial.ctx, "radial", W, H, [60], 1, 1, bh);
+    drawFrame(radial.ctx, "radial", W, H, [60], 1, 1, new Float32Array(BARS));
     expect(radial.calls.closePath).toBe(1);
   });
 

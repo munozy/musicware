@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 describe("PresetSelector (STORY-K4)", () => {
   beforeEach(() => {
+    synth.emit({ kind: "preset", index: 0 }); // reset the module's current preset to Sine
     vi.mocked(invoke).mockClear();
   });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { setPreset, subscribePreset } from "./synth";
+import { getCurrentPreset, setPreset, subscribePreset } from "./synth";
 
 // Indices must match `PRESETS` in src-tauri/src/audio.rs.
 const PRESETS = [
@@ -15,10 +15,10 @@ const PRESETS = [
  * note_on/note_off path.
  */
 function PresetSelector() {
-  const [selected, setSelected] = useState(0);
-
-  // Follow the preset broadcast so the active button reflects what's actually
-  // sounding — including the timbre a take switches to during replay.
+  // Initialise from the engine's current preset (not a hard-coded 0) so the active
+  // button is right on mount; then follow the broadcast for live clicks AND the
+  // timbre a take switches to during replay.
+  const [selected, setSelected] = useState(getCurrentPreset);
   useEffect(() => subscribePreset(setSelected), []);
 
   // setPreset emits → the broadcast updates `selected`, so we don't set it here.
