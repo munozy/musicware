@@ -143,7 +143,16 @@ function Keyboard() {
   const handlers = (note: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
+      // Drop the implicit pointer capture (touch captures to the first target),
+      // so sliding onto OTHER keys still fires their pointerenter — the glissando.
+      const el = e.currentTarget as Element;
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
       press(note);
+    },
+    // Glissando: while the button/contact is held, sliding onto a key plays it
+    // (and pointerleave releases the one you slid off). buttons & 1 = primary held.
+    onPointerEnter: (e: React.PointerEvent) => {
+      if (e.buttons & 1) press(note);
     },
     onPointerUp: () => release(note),
     onPointerLeave: () => release(note),

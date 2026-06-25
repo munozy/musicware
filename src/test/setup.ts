@@ -32,14 +32,25 @@ if (typeof HTMLCanvasElement !== "undefined") {
 }
 
 // jsdom does not implement PointerEvent. The keyboard uses pointer events
-// (onPointerDown/Up/Leave/Cancel), so provide a minimal polyfill backed by
-// MouseEvent — enough for fireEvent.pointerDown/pointerUp in tests.
+// (onPointerDown/Up/Leave/Cancel/Enter), so provide a minimal polyfill backed by
+// MouseEvent — enough for fireEvent.pointer* in tests. Expose pointerId so the
+// glissando's pointer-capture guard can be exercised.
 if (typeof window.PointerEvent === "undefined") {
   class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
     constructor(type: string, params: PointerEventInit = {}) {
       super(type, params);
+      this.pointerId = params.pointerId ?? 1;
     }
   }
   // @ts-expect-error assigning a polyfill onto the jsdom window
   window.PointerEvent = PointerEventPolyfill;
+}
+
+// jsdom doesn't implement pointer capture; stub it so the keyboard's
+// hasPointerCapture/releasePointerCapture glissando guard is exercisable (no-op).
+if (typeof Element !== "undefined" && !Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.releasePointerCapture = () => {};
+  Element.prototype.setPointerCapture = () => {};
 }
