@@ -64,7 +64,9 @@ mechanism (ADR-0002) generalised from one take to N positioned, transposed, loop
   per `on`/`off`. Pitch math only — no engine change. (Drums clips: note is a pitch *class* selector;
   transpose shifts which drum — accepted, documented; a per-track "no-transpose" flag is forward-looking.)
 - **Loop** is unrolled by the scheduler: a clip with `loopCount = n` emits its event list `n` times at
-  `start + k·durationMs`. (`loopCount = 1` = play once; a forward-looking "loop to region end" is V2.)
+  `start + k·windowLen`, where `windowLen = trimEnd − trimStart` (`= durationMs` when the clip is untrimmed)
+  — so trimmed loops abut instead of overlapping. (`loopCount = 1` = play once; a forward-looking "loop to
+  region end" is V2.) Implemented in `src/arrangement.ts` `flattenClip`; pinned by the KA-1 gate tests.
 - **Persistence** mirrors recordings: arrangements are plain versioned JSON in `localStorage`
   (`musicware.arrangements.v1`), the in-memory list is the source of truth. ClipInstances store a Recording
   **id**, never a copy — one source of truth for the take's events.

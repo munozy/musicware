@@ -112,10 +112,14 @@ Concrete V1 engine constraints:
   streams. This is a new TS engineering surface (see KA-1 below).
 
 De-risking activities:
-- **KA-1 (scheduler spike):** Before building the full arrangement UI, build a throwaway TS
-  scheduler that fires two overlapping Recordings simultaneously and confirms the engine
-  handles concurrent event feeds without stuck notes or ordering violations. This is the
-  arrangement's load-bearing mechanism; it must be validated before the UI is built.
+- **KA-1 (scheduler spike) — ✅ PASSED (2026-06-25).** Built as the pure, tested scheduler core
+  `src/arrangement.ts` (`flattenArrangement` + `playArrangement`) rather than a throwaway, since
+  the design was already decided (ADR-0007) and it is pure-frontend. 22 gate tests prove: overlapping
+  clips both sound; a mid-stream Stop releases every held note; no stranded note under loops/trims/
+  transpose; dangling clips are skipped. Hardened by a 5-lens adversarial review (2 real bugs fixed:
+  dangling-off same-pitch kill, dropped preset stamp). Engine untouched. **The dominant feasibility
+  risk is retired at the mechanism level** — the UI build is unblocked on this axis (Value/Usability
+  observation OQ-1/OQ-2 / DEBT-025 still owed before the full build).
 - **KA-2 (voice-ceiling probe):** With a typical 3-track arrangement (melody + chords + drums),
   measure the peak concurrent voice count. If it regularly exceeds 16 and voice stealing becomes
   perceptible, the polyphony ceiling is a user-visible bug, not an accepted cost.
