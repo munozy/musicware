@@ -21,7 +21,7 @@ export function noteLabel(n: number): string {
 // (the Drums preset maps note % 12 → a drum). Used to label the UI in Drums mode
 // so a "kick" reads as Kick, not "C".
 export const DRUM_NAMES = [
-  "Kick", "Rim", "Snare", "Clap", "Tom", "Tom", "Hi-hat", "Tom", "Open hat", "Crash", "Cowbell", "Ride",
+  "Kick", "Rim", "Snare", "Clap", "Tom", "Tom", "Closed hat", "Tom", "Open hat", "Crash", "Cowbell", "Ride",
 ];
 
 export function drumName(n: number): string {

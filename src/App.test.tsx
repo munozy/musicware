@@ -60,10 +60,13 @@ describe("keyboard (STORY-K1)", () => {
     const d = screen.getByRole("button", { name: /note 62/ });
 
     fireEvent.pointerDown(c); // press & hold C
+    fireEvent.pointerLeave(c); // slide off C → C releases (the real browser sequence)
     fireEvent.pointerEnter(d, { buttons: 1 }); // slide onto D with the button held → plays
     const ons = callsFor("note_on").map(([, a]) => a);
     expect(ons).toContainEqual({ note: 60 });
     expect(ons).toContainEqual({ note: 62 });
+    // The origin note goes silent as the cursor slides away (defining glissando trait).
+    expect(callsFor("note_off").map(([, a]) => a)).toContainEqual({ note: 60 });
 
     fireEvent.pointerLeave(d); // slide off D → releases D
     expect(callsFor("note_off").map(([, a]) => a)).toContainEqual({ note: 62 });

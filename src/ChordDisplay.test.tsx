@@ -35,4 +35,15 @@ describe("ChordDisplay", () => {
     expect(screen.queryByText("C")).toBeNull(); // no pitch/chord lie
     expect(screen.queryByText("major")).toBeNull();
   });
+
+  it("reverts from drum names to chord names when switching back to a tonal preset", () => {
+    render(<ChordDisplay />);
+    act(() => synth.emit({ kind: "preset", index: 4 })); // Drums
+    act(() => synth.emit({ kind: "on", note: 60 }));
+    expect(screen.getByText("drum kit")).toBeDefined();
+
+    act(() => synth.emit({ kind: "preset", index: 0 })); // back to Sine
+    expect(screen.queryByText("drum kit")).toBeNull();
+    expect(screen.getAllByText("C4").length).toBeGreaterThan(0); // pitch read-out restored
+  });
 });
