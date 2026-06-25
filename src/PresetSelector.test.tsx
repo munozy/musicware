@@ -33,6 +33,9 @@ describe("PresetSelector (STORY-K4)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Bells" }));
     expect(lastCall()).toEqual(["set_preset", { index: 3 }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Drums" }));
+    expect(lastCall()).toEqual(["set_preset", { index: 4 }]);
   });
 
   it("marks the clicked preset as the active selection", () => {
