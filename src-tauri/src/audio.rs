@@ -2343,6 +2343,51 @@ mod tests {
         );
     }
 
+    /// Behaviour-level proof (not just the lfo_phase state): a reused Sine voice,
+    /// rendered while the LIVE waveform is Theremin (the exact bug condition), must
+    /// advance its phase by exactly phase_delta·N — i.e. ZERO vibrato detune.
+    #[test]
+    fn reused_voice_has_no_vibrato_detune_under_theremin_global() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, THEREMIN);
+        let mut warm = [0.0f32; 1000];
+        render_block(
+            &mut warm,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Theremin,
+            &table,
+        );
+        // Reuse the slot for a Sine note (resets lfo_phase), then render UNDER the
+        // Theremin global so the vibrato block runs — a stale phase would detune it.
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0);
+        let (pd, p0) = {
+            let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
+            (v.phase_delta, v.phase)
+        };
+        const N: usize = 1000;
+        let mut buf = [0.0f32; N];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Theremin,
+            &table,
+        );
+        let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
+        let expected = (p0 + pd * N as f32).rem_euclid(TWO_PI);
+        let raw = (v.phase - expected).abs();
+        let diff = raw.min(TWO_PI - raw);
+        assert!(
+            diff < 1e-3,
+            "a non-theremin reused voice must get NO vibrato nudge (phase off by {diff})"
+        );
+    }
+
     /// The piano preset's release reaches exact silence/Idle despite sustain == 0
     /// — guards the `release_inc = 1/release_secs` fix (a `sustain/release` rate
     /// would be 0 here and strand the voice forever).
