@@ -224,7 +224,10 @@ kbd {
 }
 
 .vol-btn:disabled {
-  opacity: 0.35;
+  /* Keep the boundary clearly visible at a limit (WCAG 1.4.11) — dim the glyph,
+     not the whole control to a faint ghost. */
+  color: var(--text-dim);
+  opacity: 0.7;
   cursor: default;
 }
 
@@ -297,9 +300,25 @@ kbd {
   transition: border-color 0.18s, box-shadow 0.18s;
 }
 
+.rec-row {
+  position: relative;
+  overflow: hidden;
+}
+
 .rec-row.playing {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent), 0 0 16px rgba(79, 134, 247, 0.25);
+}
+
+/* Replay progress — a thin bar across the bottom of the playing row. */
+.rec-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent-3));
 }
 
 .rec-row button {
@@ -329,10 +348,13 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* A persistent (not hover-only) cue that the name is editable. */
+  text-decoration: underline dotted rgba(255, 255, 255, 0.25);
+  text-underline-offset: 3px;
 }
 
 .rec-name:hover {
-  text-decoration: underline dotted var(--text-dim);
+  text-decoration-color: var(--accent-2);
 }
 
 .rec-name-edit {

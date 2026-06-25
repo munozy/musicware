@@ -39,6 +39,8 @@ export function useRecorder() {
   // Playback scratch state.
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const playNotesRef = useRef<Set<number>>(new Set()); // notes sounding mid-playback
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [playProgress, setPlayProgress] = useState(0); // 0..1 position of the playing take
 
   // Persist whenever the library changes.
   useEffect(() => {
@@ -48,6 +50,11 @@ export function useRecorder() {
   const clearPlayback = useCallback(() => {
     for (const id of timeoutsRef.current) clearTimeout(id);
     timeoutsRef.current = [];
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    setPlayProgress(0);
     // Release anything still sounding so a stopped playback never strands a note.
     for (const note of playNotesRef.current) emit({ kind: "off", note });
     playNotesRef.current.clear();
@@ -106,6 +113,12 @@ export function useRecorder() {
       const rec = recordings.find((r) => r.id === id);
       if (!rec) return;
       setPlayingId(id);
+      setPlayProgress(0);
+      const start = performance.now();
+      const dur = Math.max(1, rec.durationMs);
+      progressTimerRef.current = setInterval(() => {
+        setPlayProgress(Math.min(1, (performance.now() - start) / dur));
+      }, 50);
       for (const ev of rec.events) {
         const handle = setTimeout(() => {
           emit(ev);
@@ -118,6 +131,11 @@ export function useRecorder() {
       const end = setTimeout(() => {
         timeoutsRef.current = [];
         playNotesRef.current.clear();
+        if (progressTimerRef.current) {
+          clearInterval(progressTimerRef.current);
+          progressTimerRef.current = null;
+        }
+        setPlayProgress(0);
         setPlayingId(null);
       }, rec.durationMs + 1);
       timeoutsRef.current.push(end);
@@ -184,6 +202,7 @@ export function useRecorder() {
     recordings,
     isRecording,
     playingId,
+    playProgress,
     elapsedMs,
     pendingDelete,
     startRecording,

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { setPreset } from "./synth";
+import { useEffect, useState } from "react";
+import { setPreset, subscribePreset } from "./synth";
 
 // Indices must match `PRESETS` in src-tauri/src/audio.rs.
 const PRESETS = [
@@ -17,10 +17,12 @@ const PRESETS = [
 function PresetSelector() {
   const [selected, setSelected] = useState(0);
 
-  const choose = (index: number) => {
-    setSelected(index);
-    setPreset(index);
-  };
+  // Follow the preset broadcast so the active button reflects what's actually
+  // sounding — including the timbre a take switches to during replay.
+  useEffect(() => subscribePreset(setSelected), []);
+
+  // setPreset emits → the broadcast updates `selected`, so we don't set it here.
+  const choose = (index: number) => setPreset(index);
 
   return (
     <div className="presets" role="group" aria-label="Timbre preset">

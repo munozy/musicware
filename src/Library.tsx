@@ -10,6 +10,7 @@ import { type PendingDelete } from "./useRecorder";
 function Library({
   recordings,
   playingId,
+  playProgress,
   pendingDelete,
   onPlay,
   onStopPlay,
@@ -20,6 +21,7 @@ function Library({
 }: {
   recordings: Recording[];
   playingId: string | null;
+  playProgress: number;
   pendingDelete: PendingDelete | null;
   onPlay: (id: string) => void;
   onStopPlay: () => void;
@@ -56,6 +58,7 @@ function Library({
               key={rec.id}
               rec={rec}
               isPlaying={playingId === rec.id}
+              progress={playingId === rec.id ? playProgress : 0}
               onPlay={() => onPlay(rec.id)}
               onStop={onStopPlay}
               onRename={(name) => onRename(rec.id, name)}
@@ -86,6 +89,7 @@ function Library({
 function RecordingRow({
   rec,
   isPlaying,
+  progress,
   onPlay,
   onStop,
   onRename,
@@ -93,6 +97,7 @@ function RecordingRow({
 }: {
   rec: Recording;
   isPlaying: boolean;
+  progress: number;
   onPlay: () => void;
   onStop: () => void;
   onRename: (name: string) => void;
@@ -181,6 +186,14 @@ function RecordingRow({
       >
         ✕
       </button>
+
+      {isPlaying && (
+        <span
+          className="rec-progress"
+          aria-hidden="true"
+          style={{ transform: `scaleX(${progress})` }}
+        />
+      )}
     </li>
   );
 }

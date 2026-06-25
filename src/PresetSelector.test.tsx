@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import PresetSelector from "./PresetSelector";
+import * as synth from "./synth";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(() => Promise.resolve()),
@@ -44,5 +45,14 @@ describe("PresetSelector (STORY-K4)", () => {
     fireEvent.click(organ);
     expect(organ.getAttribute("aria-pressed")).toBe("true");
     expect(sine.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("follows the preset broadcast (re-highlights when replay changes the timbre)", () => {
+    render(<PresetSelector />);
+    // A replayed take dispatches a preset change through synth.emit — the selector
+    // should reflect it without a click.
+    act(() => synth.emit({ kind: "preset", index: 2 }));
+    expect(screen.getByRole("button", { name: "Piano" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Sine" }).getAttribute("aria-pressed")).toBe("false");
   });
 });

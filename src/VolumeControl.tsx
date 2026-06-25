@@ -42,7 +42,7 @@ function VolumeControl() {
   return (
     <div className="volume" role="group" aria-label="Master volume">
       <span className="vol-icon" aria-hidden="true">
-        🔊
+        {level === 0 ? "🔇" : "🔊"}
       </span>
       <button
         type="button"
