@@ -1787,6 +1787,45 @@ mod tests {
         );
     }
 
+    /// DEBT-017: render-level proof that Organ and Piano are SPECTRALLY distinct,
+    /// not just different field values. Renders the same note at the same envelope
+    /// through `render_block` with each registration, normalises each by its own
+    /// peak (removing amplitude), and asserts the *shapes* differ — so the
+    /// "audibly distinct" acceptance is an automated eval, not a by-ear check.
+    #[test]
+    fn organ_and_piano_render_spectrally_distinct() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let render = |wf: Waveform| {
+            let mut pool = VoicePool::new();
+            // Same captured envelope (preset 0) for both, so any shape difference is
+            // purely the waveform/registration, not the amplitude envelope.
+            apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0);
+            let v = pool.voices.iter_mut().find(|v| v.note == 69).unwrap();
+            v.stage = EnvStage::Decay;
+            v.env = 1.0;
+            let mut buf = [0.0f32; 1024];
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, wf, &table);
+            buf
+        };
+        let organ = render(Waveform::Organ);
+        let piano = render(Waveform::EPiano);
+
+        let peak = |b: &[f32; 1024]| b.iter().fold(1e-9f32, |m, &x| m.max(x.abs()));
+        let (po, pp) = (peak(&organ), peak(&piano));
+        let mut max_shape_diff = 0.0f32;
+        for i in 0..1024 {
+            let d = (organ[i] / po - piano[i] / pp).abs();
+            if d > max_shape_diff {
+                max_shape_diff = d;
+            }
+        }
+        assert!(
+            max_shape_diff > 0.1,
+            "Organ and Piano must render spectrally-distinct shapes (max normalised diff {max_shape_diff})"
+        );
+    }
+
     /// The piano preset's release reaches exact silence/Idle despite sustain == 0
     /// — guards the `release_inc = 1/release_secs` fix (a `sustain/release` rate
     /// would be 0 here and strand the voice forever).

@@ -47,6 +47,20 @@ function announce(e: NoteSignal): void {
 }
 
 /**
+ * Preset-change broadcast. Fires whenever the active preset reaches the engine —
+ * live click OR replay — so the preset selector can reflect what's actually
+ * sounding (e.g. re-highlight the timbre a take was recorded with during replay).
+ */
+const presetListeners = new Set<(index: number) => void>();
+
+export function subscribePreset(fn: (index: number) => void): () => void {
+  presetListeners.add(fn);
+  return () => {
+    presetListeners.delete(fn);
+  };
+}
+
+/**
  * Dispatch one event to the engine WITHOUT tapping the recorder — used by replay
  * so playing a take never records itself. `kind` maps 1:1 to a Tauri command.
  */
@@ -63,6 +77,7 @@ export function emit(e: SynthEvent): void {
     case "preset":
       currentPreset = e.index;
       invoke("set_preset", { index: e.index }).catch((err) => console.error("set_preset failed", err));
+      for (const fn of presetListeners) fn(e.index);
       break;
   }
 }

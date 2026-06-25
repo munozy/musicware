@@ -58,6 +58,7 @@ function App() {
         <Library
           recordings={rec.recordings}
           playingId={rec.playingId}
+          playProgress={rec.playProgress}
           pendingDelete={rec.pendingDelete}
           onPlay={rec.play}
           onStopPlay={rec.stopPlayback}

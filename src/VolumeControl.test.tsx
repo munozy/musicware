@@ -49,6 +49,14 @@ describe("VolumeControl", () => {
     expect(screen.getByText("25%")).toBeDefined();
   });
 
+  it("shows a mute icon at 0% and the speaker icon otherwise", () => {
+    render(<VolumeControl />);
+    expect(screen.getByText("🔊")).toBeDefined(); // default 0.6
+    fireEvent.change(screen.getByLabelText("Volume level"), { target: { value: "0" } });
+    expect(screen.getByText("🔇")).toBeDefined();
+    expect(screen.queryByText("🔊")).toBeNull();
+  });
+
   it("clamps at the ceiling and disables + at max", () => {
     render(<VolumeControl />);
     fireEvent.change(screen.getByLabelText("Volume level"), { target: { value: "1" } });

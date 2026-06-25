@@ -155,6 +155,22 @@ describe("useRecorder — playback", () => {
     expect(result.current.playingId).toBeNull();
   });
 
+  it("tracks playback progress 0→1 as a take plays", () => {
+    const { result } = renderHook(() => useRecorder());
+    act(() => result.current.startRecording());
+    setNow(100);
+    act(() => synth.noteOn(62));
+    setNow(300);
+    act(() => result.current.stopRecording()); // duration 300ms
+    const id = result.current.recordings[0].id;
+
+    act(() => result.current.play(id)); // start = performance.now() = 300
+    expect(result.current.playProgress).toBe(0);
+    setNow(450); // 150ms into a 300ms take
+    act(() => vi.advanceTimersByTime(50)); // progress interval fires
+    expect(result.current.playProgress).toBeCloseTo(0.5, 2);
+  });
+
   it("releases sounding notes when the hook unmounts mid-playback (no stranded voice)", () => {
     const { result, unmount } = renderHook(() => useRecorder());
     act(() => result.current.startRecording());
