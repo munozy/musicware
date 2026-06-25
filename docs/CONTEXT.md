@@ -66,6 +66,11 @@ Seeded 2026-06-19 from BC-001 (Discovery). These are working definitions for a l
 - **Bus / Send** *(later)* — A bus sums several tracks for shared processing; a send routes a portion of a track to a bus (e.g. a shared reverb). Reserved in the data model, inert in V1.
 - **Automation lane** *(later)* — A per-track, per-parameter curve over time (volume, pan, filter cutoff, reverb/delay amount, any future parameter) drawn under a track. Reserved in the data model, inert in V1.
 
+> Design principle (canonical, 2026-06-25). This supersedes the earlier "deliberate part vs self-contained performance" framing, which misread the product.
+
+- **Composition = reusable building block** — A saved Recording/Take is a **reusable musical building block** (a "LEGO brick"): a short, self-contained musical idea created to be **duplicated, transposed, rearranged, and combined with other compositions** on the arrangement timeline to form a song. A composition is **not** expected to be a finished song. Therefore **short durations, default "Composition N" names, and deliberately incomplete ideas are expected, valid outcomes of the intended workflow — never, on their own, evidence of "exploratory/throwaway" use.** This is the premise the whole arrangement feature and the [moonozy-music agents](agents/moonozy-music/README.md) are built on.
+- **Recombination workflow** — The core user loop the building-block model implies: capture small compositions → **duplicate / transpose / arrange / combine** them across tracks → a song. The open *desirability/usability* risk is how readily beginners engage this loop — tested with an arrangement-workspace prototype (the recorder alone has **no affordance to combine bricks**, so absence of combination today is not evidence against the want; see [DISCOVERY-001](product/discovery/DISCOVERY-001-arrangement-value-usability.md) OQ-3).
+
 ## Architecture terms
 
 > Per [ADR-0001](architecture/decisions/ADR-0001-react-tauri-rust-audio-engine.md): React+TS UI in **Tauri (v2)**, **Rust** audio engine. No Python.

@@ -7,6 +7,15 @@
 > (the Rust engine has no mixing graph today). V1 is deliberately constrained to what the engine
 > can do today; the pro-effects tier is gated on a future DSP-graph ADR.
 
+> **Update 2026-06-25 (building-block clarification).** Compositions are **reusable building blocks**,
+> not draft songs (canonical: `docs/CONTEXT.md` — "Composition = reusable building block"). This
+> confirms multi-track recombination (**Solution A**) as the *intended product*, not a hypothesis:
+> the alternative **Solution B** (longer single Takes + section markers) is **retired as off-vision**
+> (monolithic, not modular), and the original Value-risk questions OQ-1/OQ-2 (role-naming + recorder
+> usage logs) are **superseded by OQ-3** — a desirability/usability prototype gate for the
+> recombination UX (see [DISCOVERY-001](../discovery/DISCOVERY-001-arrangement-value-usability.md)).
+> The remaining pre-build risk is Usability (is the arrangement UX learnable?), not Value.
+
 ---
 
 ## Problem & opportunity
@@ -561,6 +570,13 @@ unit tests over integration/E2E for the core scheduling logic.
 ---
 
 ## Discovery evidence & open questions
+
+> **⚠️ Superseded (2026-06-25) — read with the header's building-block update.** The Solution A/B
+> framing and OQ-1/OQ-2 below are **retired**: compositions are reusable building blocks (not draft
+> songs), so **Solution B is off-vision** and OQ-1/OQ-2 (role-naming + recorder usage logs) are
+> **replaced by OQ-3**, a prototype desirability/usability gate. The live discovery instrument is
+> [DISCOVERY-001](../discovery/DISCOVERY-001-arrangement-value-usability.md). This block is kept for
+> historical traceability only.
 
 **Opportunity Solution Tree branch.**
 
