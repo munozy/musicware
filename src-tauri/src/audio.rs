@@ -164,7 +164,7 @@ const EPIANO_NORM: f32 = 2.67; // Σ = 2.66
 /// vocal body (the eerie theremin tone). The character comes from the VIBRATO +
 /// soft-swell envelope, not the spectrum.
 const THEREMIN_HARMONICS: [f32; 8] = [1.0, 0.12, 0.06, 0.0, 0.0, 0.0, 0.0, 0.0];
-const THEREMIN_NORM: f32 = 1.18; // Σ = 1.18 → ∈[-1,1] by construction
+const THEREMIN_NORM: f32 = 1.19; // ≥ Σ|amps| (1.18) → ∈[-1,1] by construction (true peak ~0.84)
 /// Vibrato: a gentle pitch wobble — the theremin's signature. ~5.5 Hz, ±3% of the
 /// frequency (≈ ±0.5 semitone). Applied as a per-sample phase modulation.
 const THEREMIN_VIB_HZ: f32 = 5.5;
@@ -755,14 +755,17 @@ fn apply_event(pool: &mut VoicePool, ev: NoteEvent, sample_rate: f32, current_pr
                     ^ (age as u32).wrapping_mul(40_503)
                     | 1;
             }
-            // Arm the vibrato LFO for a Theremin note (radians/sample, precomputed so
-            // the render path needs no sample rate). lfo_inc stays 0 for other presets.
-            if PRESETS[current_preset as usize].waveform == Waveform::Theremin {
-                v.lfo_phase = 0.0;
-                v.lfo_inc = TWO_PI * THEREMIN_VIB_HZ / sample_rate.max(1.0);
+            // Always reset the vibrato LFO phase at note-on so sin(lfo_phase)=0 at the
+            // start of EVERY note — the vibrato nudge is depth·phase_delta·sin(lfo_phase),
+            // so a stale phase left on a reused voice slot would be a constant DC pitch
+            // detune. Arm lfo_inc only for a Theremin note (radians/sample, precomputed
+            // so the render path needs no sample rate); 0 elsewhere freezes the LFO.
+            v.lfo_phase = 0.0;
+            v.lfo_inc = if PRESETS[current_preset as usize].waveform == Waveform::Theremin {
+                TWO_PI * THEREMIN_VIB_HZ / sample_rate.max(1.0)
             } else {
-                v.lfo_inc = 0.0;
-            }
+                0.0
+            };
             // bell_phases are NOT reset: leaving them continuous avoids a click on a
             // bell re-strike; from silence the attack ramps from env 0 anyway.
             // Neither phase nor env is reset: both stay continuous so retriggering
@@ -865,7 +868,8 @@ fn render_block(
                 // Theremin vibrato: nudge the phase by a slow LFO so the instantaneous
                 // frequency wobbles ±VIB_DEPTH around the note (the loop adds the base
                 // phase_delta below → net advance = phase_delta·(1 + depth·sin(lfo))).
-                // lfo_inc is 0 for non-theremin voices, so this is a no-op for them.
+                // For non-theremin voices lfo_inc=0 freezes the LFO and lfo_phase was
+                // reset to 0 at note-on, so sin(lfo_phase)=0 → the nudge is exactly zero.
                 if waveform == Waveform::Theremin {
                     v.lfo_phase += v.lfo_inc;
                     while v.lfo_phase >= TWO_PI {
@@ -2305,6 +2309,37 @@ mod tests {
         assert!(
             diff > 0.05,
             "vibrato should perturb the accumulated phase (diff={diff})"
+        );
+    }
+
+    /// Regression: a non-Theremin note-on must reset the vibrato phase, so a voice
+    /// slot reused from a prior theremin note can't carry a stale `lfo_phase` that
+    /// would become a constant DC pitch detune (sin(lfo_phase) frozen ≠ 0).
+    #[test]
+    fn non_theremin_note_resets_vibrato_phase() {
+        let sr = 44_100.0;
+        let table = build_adsr_table(sr);
+        let mut pool = VoicePool::new();
+        // Play a theremin note and render so its LFO phase advances to non-zero.
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, THEREMIN);
+        let mut buf = [0.0f32; 1000];
+        render_block(
+            &mut buf,
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            Waveform::Theremin,
+            &table,
+        );
+        assert!(pool.voices.iter().find(|v| v.note == 69).unwrap().lfo_phase > 0.0);
+
+        // Reuse the SAME slot (same-note alloc) for a non-theremin (Sine) note.
+        apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0);
+        let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
+        assert_eq!(v.lfo_inc, 0.0, "non-theremin note must not arm the LFO");
+        assert_eq!(
+            v.lfo_phase, 0.0,
+            "non-theremin note must reset lfo_phase (no stale vibrato detune)"
         );
     }
 

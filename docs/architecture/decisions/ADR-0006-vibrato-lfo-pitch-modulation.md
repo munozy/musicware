@@ -21,7 +21,10 @@ near-sine, bounded by its norm), and the LFO nudges the phase advance by
 `THEREMIN_VIB_DEPTH · phase_delta · sin(lfo_phase)` so the net advance is `phase_delta·(1 + depth·sin)` —
 i.e. ±`depth` frequency vibrato. `lfo_inc` (radians/sample) is **precomputed at note-on** (where the sample
 rate is known), so the render loop needs no `sr` and does no allocation. It is **inert for other presets**:
-non-theremin voices have `lfo_inc == 0`, so the modulation term is zero.
+`lfo_phase` is reset to 0 at **every** note-on and `lfo_inc` is 0 for non-theremin voices, so the LFO stays
+frozen at phase 0 and the nudge `depth·phase_delta·sin(lfo_phase) = depth·phase_delta·sin(0) = 0`. (The
+invariant is `sin(lfo_phase)=0`, which the per-note `lfo_phase` reset guarantees — `lfo_inc=0` alone would
+*not* suffice if a stale phase were left on a reused voice slot.)
 
 ## Consequences
 - **Positive:** vibrato with almost no new surface — two `f32` fields and a few lines in the render loop;
