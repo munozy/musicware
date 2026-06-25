@@ -1,29 +1,33 @@
-import { useEffect, useRef, useState } from "react";
-import { useRecorder } from "./useRecorder";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { formatDuration, type Recording } from "./recordings";
+import { type PendingDelete } from "./useRecorder";
 
 /**
- * Transport + library for keyboard compositions. Record arms the capture tap;
- * each take lands in a persisted list you can replay, rename, or delete (with a
- * brief undo window so a misclick on delete is recoverable).
+ * The compositions sidebar: the saved-take list + the undo toast. Presentational —
+ * state comes from App's useRecorder. Replaces the take/Library half of the old
+ * Recorder component.
  */
-function Recorder() {
-  const {
-    recordings,
-    isRecording,
-    playingId,
-    elapsedMs,
-    pendingDelete,
-    startRecording,
-    stopRecording,
-    play,
-    stopPlayback,
-    rename,
-    remove,
-    undoDelete,
-  } = useRecorder();
-
-  const recordBtnRef = useRef<HTMLButtonElement>(null);
+function Library({
+  recordings,
+  playingId,
+  pendingDelete,
+  onPlay,
+  onStopPlay,
+  onRename,
+  onDelete,
+  onUndo,
+  recordBtnRef,
+}: {
+  recordings: Recording[];
+  playingId: string | null;
+  pendingDelete: PendingDelete | null;
+  onPlay: (id: string) => void;
+  onStopPlay: () => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+  onUndo: () => void;
+  recordBtnRef: RefObject<HTMLButtonElement | null>;
+}) {
   const undoBtnRef = useRef<HTMLButtonElement>(null);
 
   // After a delete, move focus to Undo so a keyboard user isn't stranded on the
@@ -35,31 +39,16 @@ function Recorder() {
   }, [pendingDelete]);
 
   const handleUndo = () => {
-    undoDelete();
+    onUndo();
     recordBtnRef.current?.focus(); // the toast is about to unmount — anchor focus
   };
 
   return (
-    <section className="recorder" aria-label="Composition recorder">
-      <div className="transport">
-        <button
-          ref={recordBtnRef}
-          type="button"
-          className={`rec-btn${isRecording ? " armed" : ""}`}
-          aria-pressed={isRecording}
-          aria-label={isRecording ? "Stop recording" : "Record"}
-          onClick={isRecording ? stopRecording : startRecording}
-        >
-          <span className="rec-dot" aria-hidden="true" />
-          {isRecording ? `Stop · ${formatDuration(elapsedMs)}` : "Record"}
-        </button>
-        <span className="rec-status" aria-live="polite">
-          {isRecording ? "Recording — play the keyboard" : `${recordings.length} saved`}
-        </span>
-      </div>
+    <aside className="library" aria-label="Compositions">
+      <h2 className="library-title">Compositions</h2>
 
       {recordings.length === 0 ? (
-        <p className="rec-empty">No compositions yet — hit Record and play the keyboard.</p>
+        <p className="rec-empty">No takes yet — hit Record and play.</p>
       ) : (
         <ul className="rec-list">
           {recordings.map((rec) => (
@@ -67,10 +56,10 @@ function Recorder() {
               key={rec.id}
               rec={rec}
               isPlaying={playingId === rec.id}
-              onPlay={() => play(rec.id)}
-              onStop={stopPlayback}
-              onRename={(name) => rename(rec.id, name)}
-              onDelete={() => remove(rec.id)}
+              onPlay={() => onPlay(rec.id)}
+              onStop={onStopPlay}
+              onRename={(name) => onRename(rec.id, name)}
+              onDelete={() => onDelete(rec.id)}
             />
           ))}
         </ul>
@@ -90,7 +79,7 @@ function Recorder() {
           </button>
         </div>
       )}
-    </section>
+    </aside>
   );
 }
 
@@ -118,12 +107,10 @@ function RecordingRow({
   const nameBtnRef = useRef<HTMLButtonElement>(null);
   const wasEditingRef = useRef(false);
 
-  // Keep the draft in sync if the name changes from elsewhere while not editing.
   useEffect(() => {
     if (!editing) setDraft(rec.name);
   }, [rec.name, editing]);
 
-  // On leaving edit mode (commit or cancel), restore focus to the name button.
   useEffect(() => {
     if (wasEditingRef.current && !editing) nameBtnRef.current?.focus();
     wasEditingRef.current = editing;
@@ -142,7 +129,7 @@ function RecordingRow({
     else setDraft(rec.name);
   };
   const cancel = () => {
-    committedRef.current = true; // a following blur must not re-commit
+    committedRef.current = true;
     setDraft(rec.name);
     setEditing(false);
   };
@@ -198,4 +185,4 @@ function RecordingRow({
   );
 }
 
-export default Recorder;
+export default Library;

@@ -24,6 +24,13 @@ afterEach(() => cleanup());
   Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
 }
 
+// jsdom has no canvas 2D context. The Visualizer guards on a null context and
+// no-ops; stub getContext to return null cleanly (avoids jsdom "not implemented"
+// noise) so rendering <App/> in tests is silent.
+if (typeof HTMLCanvasElement !== "undefined") {
+  HTMLCanvasElement.prototype.getContext = (() => null) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+}
+
 // jsdom does not implement PointerEvent. The keyboard uses pointer events
 // (onPointerDown/Up/Leave/Cancel), so provide a minimal polyfill backed by
 // MouseEvent — enough for fireEvent.pointerDown/pointerUp in tests.
