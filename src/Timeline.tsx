@@ -1,28 +1,26 @@
 /**
- * Timeline — ruler + track lanes + clip blocks + static playhead.
+ * Timeline — ruler + track lanes + clip blocks + animated playhead.
  *
  * Drop math (the px→ms risk, pure-tested in timeScale):
- *   PX_PER_SEC = 40  →  pxPerMs = 40 / 1000 = 0.04
  *   offsetPx  = clamp(clientX − lane.left [− grabOffset for a move], 0, lane.width)
- *   startMs   = snapMs(pxToMs(offsetPx, pxPerMs), SNAP_MS)
+ *   startMs   = snapMs(pxToMs(offsetPx, PX_PER_MS), SNAP_MS)
  *
  * Two drop payloads on text/plain:
  *   "clip:<recordingId>"            — a new clip dragged from the shelf
  *   "move:<clipId>:<grabOffsetPx>"  — an existing clip dragged within the timeline
- * Placed clips are also keyboard-movable (focus + Left/Right arrows).
- * SNAP_MS = 100 keeps Slice 1/2 usable; the full bar/beat grid is Slice 7.
+ * Placed clips are keyboard-movable (focus + Left/Right) and removable (Delete / ✕).
+ * The ruler is offset by LANE_ORIGIN_PX (CSS) so ticks line up with clip positions.
+ * SNAP_MS = 100 keeps things usable; the full bar/beat grid is Slice 7.
  */
 
 import { useRef } from "react";
 import type { Arrangement, ClipInstance } from "./arrangement";
 import type { Recording } from "./recordings";
-import { pxToMs, msToPx, snapMs } from "./timeScale";
+import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
+import Playhead from "./Playhead";
 
-export const PX_PER_SEC = 40;
-const PX_PER_MS = PX_PER_SEC / 1000;
 const SNAP_MS = 100;
-
 const RULER_TICK_MS = 1000;
 const RULER_WIDTH_MS = 30_000; // show 30 seconds of ruler
 
@@ -38,8 +36,10 @@ type Props = {
   arrangement: Arrangement;
   recordings: Recording[];
   isPlaying: boolean;
+  playStartedAt: number | null;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   onMoveClip: (clipId: string, startMs: number) => void;
+  onRemoveClip: (clipId: string) => void;
   trackOps: TrackOps;
 };
 
@@ -47,10 +47,12 @@ function ClipBlock({
   clip,
   recordings,
   onMoveClip,
+  onRemoveClip,
 }: {
   clip: ClipInstance;
   recordings: Recording[];
   onMoveClip: (clipId: string, startMs: number) => void;
+  onRemoveClip: (clipId: string) => void;
 }) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
@@ -70,6 +72,9 @@ function ClipBlock({
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       onMoveClip(clip.id, clip.startMs + SNAP_MS);
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      onRemoveClip(clip.id);
     }
   };
 
@@ -83,9 +88,22 @@ function ClipBlock({
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds. Drag, or use Left and Right arrows to move.`}
+      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds. Drag or arrow keys to move; Delete to remove.`}
     >
       <span className="timeline-clip-label">{name}</span>
+      <button
+        className="timeline-clip-delete"
+        aria-label={`Remove ${name} clip`}
+        title="Remove"
+        draggable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemoveClip(clip.id);
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }
@@ -96,12 +114,14 @@ function TrackLane({
   recordings,
   onPlaceClip,
   onMoveClip,
+  onRemoveClip,
 }: {
   trackId: string;
   clips: ClipInstance[];
   recordings: Recording[];
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   onMoveClip: (clipId: string, startMs: number) => void;
+  onRemoveClip: (clipId: string) => void;
 }) {
   const laneRef = useRef<HTMLDivElement>(null);
 
@@ -144,7 +164,13 @@ function TrackLane({
       onDrop={handleDrop}
     >
       {clips.map((clip) => (
-        <ClipBlock key={clip.id} clip={clip} recordings={recordings} onMoveClip={onMoveClip} />
+        <ClipBlock
+          key={clip.id}
+          clip={clip}
+          recordings={recordings}
+          onMoveClip={onMoveClip}
+          onRemoveClip={onRemoveClip}
+        />
       ))}
     </div>
   );
@@ -168,8 +194,10 @@ export default function Timeline({
   arrangement,
   recordings,
   isPlaying,
+  playStartedAt,
   onPlaceClip,
   onMoveClip,
+  onRemoveClip,
   trackOps,
 }: Props) {
   return (
@@ -193,6 +221,7 @@ export default function Timeline({
               recordings={recordings}
               onPlaceClip={onPlaceClip}
               onMoveClip={onMoveClip}
+              onRemoveClip={onRemoveClip}
             />
           </div>
         ))}
@@ -200,8 +229,7 @@ export default function Timeline({
       <button className="timeline-add-track" onClick={trackOps.onAddTrack}>
         + Add track
       </button>
-      {/* Static playhead — becomes animated in Slice 7 */}
-      <div className={`timeline-playhead${isPlaying ? " playing" : ""}`} aria-hidden="true" />
+      <Playhead isPlaying={isPlaying} playStartedAt={playStartedAt} />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   setTrackColor as setTrackColorStore,
   reorderTrack as reorderTrackStore,
   removeTrack as removeTrackStore,
+  removeClip as removeClipStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
@@ -22,6 +23,8 @@ import type { Recording } from "./recordings";
 export function useArrangement() {
   const [arrangement, setArrangement] = useState<Arrangement>(() => loadArrangement());
   const [isPlaying, setIsPlaying] = useState(false);
+  // Wall-clock (performance.now) at playback start; drives the animated playhead. Null when stopped.
+  const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
 
   const playerRef = useRef<Player | null>(null);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,6 +63,11 @@ export function useArrangement() {
     [],
   );
 
+  /** Remove a placed clip from the timeline (US-14, pulled forward from Slice 5). */
+  const removeClip = useCallback((clipId: string) => {
+    setArrangement((prev) => removeClipStore(prev, clipId));
+  }, []);
+
   /** Internal stop — releases all held notes and clears state. */
   const stopInternal = useCallback(() => {
     if (endTimerRef.current) {
@@ -71,6 +79,7 @@ export function useArrangement() {
       playerRef.current = null;
     }
     setIsPlaying(false);
+    setPlayStartedAt(null);
   }, []);
 
   /**
@@ -85,6 +94,7 @@ export function useArrangement() {
       const player = playArrangement(events, emit);
       playerRef.current = player;
       setIsPlaying(true);
+      setPlayStartedAt(performance.now());
 
       // Clear the playing flag just after the final event (mirrors useRecorder's end timer).
       const lastT = events.length > 0 ? events[events.length - 1].t : 0;
@@ -92,6 +102,7 @@ export function useArrangement() {
         playerRef.current = null;
         endTimerRef.current = null;
         setIsPlaying(false);
+        setPlayStartedAt(null);
       }, lastT + 1);
     },
     [arrangement],
@@ -112,8 +123,10 @@ export function useArrangement() {
   return {
     arrangement,
     isPlaying,
+    playStartedAt,
     placeClip,
     moveClip,
+    removeClip,
     addTrack,
     renameTrack,
     setTrackColor,

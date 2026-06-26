@@ -10,6 +10,7 @@ import {
   setTrackColor,
   reorderTrack,
   removeTrack,
+  removeClip,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -216,5 +217,26 @@ describe("track management", () => {
     const single = { ...arr, tracks: [arr.tracks[0]] };
     expect(removeTrack(single, single.tracks[0].id)).toBe(single); // refuses the last track
     expect(removeTrack(arr, "nope")).toBe(arr); // unknown id unchanged
+  });
+});
+
+describe("removeClip", () => {
+  const seed = () => {
+    const arr = newArrangement();
+    const tid = arr.tracks[0].id;
+    const withClip = addClip(arr, tid, "rec-1", 0);
+    return { arr: withClip, clipId: withClip.tracks[0].clips[0].id };
+  };
+
+  it("removes the clip from its track (immutable)", () => {
+    const { arr, clipId } = seed();
+    const next = removeClip(arr, clipId);
+    expect(next.tracks[0].clips).toHaveLength(0);
+    expect(arr.tracks[0].clips).toHaveLength(1); // original unchanged
+  });
+
+  it("returns the arrangement unchanged for an unknown clipId", () => {
+    const { arr } = seed();
+    expect(removeClip(arr, "no-such-clip")).toBe(arr);
   });
 });
