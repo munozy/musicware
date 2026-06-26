@@ -20,6 +20,8 @@ const ops = () => ({
   onSetColor: vi.fn(),
   onReorder: vi.fn(),
   onRemove: vi.fn(),
+  onToggleMute: vi.fn(),
+  onToggleSolo: vi.fn(),
 });
 
 const asBtn = (el: HTMLElement) => el as HTMLButtonElement;
@@ -76,5 +78,20 @@ describe("TrackHeader", () => {
     const o = ops();
     render(<TrackHeader track={mkTrack()} index={0} trackCount={1} {...o} />);
     expect(asBtn(screen.getByRole("button", { name: /^remove track 1$/i })).disabled).toBe(true);
+  });
+
+  it("M and S buttons toggle mute and solo", () => {
+    const o = ops();
+    render(<TrackHeader track={mkTrack()} index={0} trackCount={3} {...o} />);
+    fireEvent.click(screen.getByRole("button", { name: /mute track 1/i }));
+    expect(o.onToggleMute).toHaveBeenCalledWith("t1");
+    fireEvent.click(screen.getByRole("button", { name: /solo track 1/i }));
+    expect(o.onToggleSolo).toHaveBeenCalledWith("t1");
+  });
+
+  it("reflects muted state via aria-pressed", () => {
+    const o = ops();
+    render(<TrackHeader track={mkTrack({ muted: true })} index={0} trackCount={3} {...o} />);
+    expect(asBtn(screen.getByRole("button", { name: /unmute track 1/i })).getAttribute("aria-pressed")).toBe("true");
   });
 });

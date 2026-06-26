@@ -17,6 +17,8 @@ type Props = {
   onSetColor: (trackId: string, color: string) => void;
   onReorder: (trackId: string, dir: "up" | "down") => void;
   onRemove: (trackId: string) => void;
+  onToggleMute: (trackId: string) => void;
+  onToggleSolo: (trackId: string) => void;
 };
 
 export default function TrackHeader({
@@ -27,6 +29,8 @@ export default function TrackHeader({
   onSetColor,
   onReorder,
   onRemove,
+  onToggleMute,
+  onToggleSolo,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(track.name);
@@ -100,6 +104,25 @@ export default function TrackHeader({
         aria-label={`Change colour of ${track.name}`}
         onClick={cycleColor}
       />
+
+      <button
+        className={`track-btn track-mute${track.muted ? " active" : ""}`}
+        aria-pressed={track.muted}
+        aria-label={`${track.muted ? "Unmute" : "Mute"} ${track.name}`}
+        title="Mute"
+        onClick={() => onToggleMute(track.id)}
+      >
+        M
+      </button>
+      <button
+        className={`track-btn track-solo${track.soloed ? " active" : ""}`}
+        aria-pressed={track.soloed}
+        aria-label={`${track.soloed ? "Unsolo" : "Solo"} ${track.name}`}
+        title="Solo"
+        onClick={() => onToggleSolo(track.id)}
+      >
+        S
+      </button>
 
       {confirming ? (
         <span className="track-delete-confirm">

@@ -30,6 +30,8 @@ export type TrackOps = {
   onSetTrackColor: (trackId: string, color: string) => void;
   onReorderTrack: (trackId: string, dir: "up" | "down") => void;
   onRemoveTrack: (trackId: string) => void;
+  onToggleMute: (trackId: string) => void;
+  onToggleSolo: (trackId: string) => void;
 };
 
 type Props = {
@@ -214,6 +216,8 @@ export default function Timeline({
               onSetColor={trackOps.onSetTrackColor}
               onReorder={trackOps.onReorderTrack}
               onRemove={trackOps.onRemoveTrack}
+              onToggleMute={trackOps.onToggleMute}
+              onToggleSolo={trackOps.onToggleSolo}
             />
             <TrackLane
               trackId={track.id}

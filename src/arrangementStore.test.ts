@@ -11,6 +11,8 @@ import {
   reorderTrack,
   removeTrack,
   removeClip,
+  toggleTrackMuted,
+  toggleTrackSoloed,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -238,5 +240,25 @@ describe("removeClip", () => {
   it("returns the arrangement unchanged for an unknown clipId", () => {
     const { arr } = seed();
     expect(removeClip(arr, "no-such-clip")).toBe(arr);
+  });
+});
+
+describe("track mute / solo toggles", () => {
+  it("toggleTrackMuted flips muted (immutable); unknown id unchanged", () => {
+    const arr = newArrangement();
+    const id = arr.tracks[0].id;
+    expect(arr.tracks[0].muted).toBe(false);
+    const muted = toggleTrackMuted(arr, id);
+    expect(muted.tracks[0].muted).toBe(true);
+    expect(arr.tracks[0].muted).toBe(false); // original unchanged
+    expect(toggleTrackMuted(muted, id).tracks[0].muted).toBe(false); // toggles back
+    expect(toggleTrackMuted(arr, "nope")).toBe(arr);
+  });
+
+  it("toggleTrackSoloed flips soloed; unknown id unchanged", () => {
+    const arr = newArrangement();
+    const id = arr.tracks[1].id;
+    expect(toggleTrackSoloed(arr, id).tracks[1].soloed).toBe(true);
+    expect(toggleTrackSoloed(arr, "nope")).toBe(arr);
   });
 });

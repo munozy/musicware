@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { flattenArrangement, playArrangement, type Arrangement, type Player } from "./arrangement";
+import {
+  flattenArrangement,
+  playArrangement,
+  type Arrangement,
+  type Player,
+  type ScheduledEvent,
+} from "./arrangement";
 import {
   loadArrangement,
   saveArrangement,
@@ -11,6 +17,8 @@ import {
   reorderTrack as reorderTrackStore,
   removeTrack as removeTrackStore,
   removeClip as removeClipStore,
+  toggleTrackMuted as toggleTrackMutedStore,
+  toggleTrackSoloed as toggleTrackSoloedStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
@@ -28,6 +36,11 @@ export function useArrangement() {
 
   const playerRef = useRef<Player | null>(null);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Per-recording preview (shelf ▶). Separate player from arrangement playback.
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const previewRef = useRef<Player | null>(null);
+  const previewEndRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Persist arrangement to localStorage on every change (mirrors useRecorder).
   useEffect(() => {
@@ -66,6 +79,27 @@ export function useArrangement() {
   /** Remove a placed clip from the timeline (US-14, pulled forward from Slice 5). */
   const removeClip = useCallback((clipId: string) => {
     setArrangement((prev) => removeClipStore(prev, clipId));
+  }, []);
+
+  /** Mute / solo a track (US-7/8). flattenArrangement already honours both flags. */
+  const toggleMute = useCallback((trackId: string) => {
+    setArrangement((prev) => toggleTrackMutedStore(prev, trackId));
+  }, []);
+  const toggleSolo = useCallback((trackId: string) => {
+    setArrangement((prev) => toggleTrackSoloedStore(prev, trackId));
+  }, []);
+
+  /** Stop any in-progress recording preview and release its notes. */
+  const stopPreview = useCallback(() => {
+    if (previewEndRef.current) {
+      clearTimeout(previewEndRef.current);
+      previewEndRef.current = null;
+    }
+    if (previewRef.current) {
+      previewRef.current.stop();
+      previewRef.current = null;
+    }
+    setPreviewingId(null);
   }, []);
 
   /** Internal stop — releases all held notes and clears state. */
@@ -113,17 +147,41 @@ export function useArrangement() {
     stopInternal();
   }, [stopInternal]);
 
+  /** Preview a single saved recording (shelf ▶); clicking the playing one stops it. */
+  const previewRecording = useCallback(
+    (rec: Recording) => {
+      if (previewRef.current && !previewRef.current.stopped && previewingId === rec.id) {
+        stopPreview();
+        return;
+      }
+      stopPreview();
+      stopInternal(); // don't overlap a preview with arrangement playback
+      const events = [...rec.events].sort((a, b) => a.t - b.t) as ScheduledEvent[];
+      previewRef.current = playArrangement(events, emit);
+      setPreviewingId(rec.id);
+      const lastT = events.length > 0 ? events[events.length - 1].t : 0;
+      previewEndRef.current = setTimeout(() => {
+        previewRef.current = null;
+        previewEndRef.current = null;
+        setPreviewingId(null);
+      }, lastT + 1);
+    },
+    [previewingId, stopPreview, stopInternal],
+  );
+
   // Release notes on unmount (HMR / mode switch) — mirrors useRecorder cleanup.
   useEffect(() => {
     return () => {
       stopInternal();
+      stopPreview();
     };
-  }, [stopInternal]);
+  }, [stopInternal, stopPreview]);
 
   return {
     arrangement,
     isPlaying,
     playStartedAt,
+    previewingId,
     placeClip,
     moveClip,
     removeClip,
@@ -132,6 +190,10 @@ export function useArrangement() {
     setTrackColor,
     reorderTrack,
     removeTrack,
+    toggleMute,
+    toggleSolo,
+    previewRecording,
+    stopPreview,
     play,
     stop,
   };

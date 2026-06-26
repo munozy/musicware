@@ -21,6 +21,7 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     arrangement,
     isPlaying,
     playStartedAt,
+    previewingId,
     placeClip,
     moveClip,
     removeClip,
@@ -29,6 +30,9 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     setTrackColor,
     reorderTrack,
     removeTrack,
+    toggleMute,
+    toggleSolo,
+    previewRecording,
     play,
     stop,
   } = useArrangement();
@@ -61,6 +65,8 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
           recordings={recordings}
           trackIds={arrangement.tracks.map((t) => t.id)}
           onPlaceClip={placeClip}
+          onPreview={previewRecording}
+          previewingId={previewingId}
         />
         <Timeline
           arrangement={arrangement}
@@ -76,6 +82,8 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
             onSetTrackColor: setTrackColor,
             onReorderTrack: reorderTrack,
             onRemoveTrack: removeTrack,
+            onToggleMute: toggleMute,
+            onToggleSolo: toggleSolo,
           }}
         />
       </div>

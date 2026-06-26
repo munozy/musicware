@@ -164,3 +164,15 @@ export function removeClip(arr: Arrangement, clipId: string): Arrangement {
   });
   return found ? { ...arr, tracks } : arr;
 }
+
+/** Toggle a track's mute (US-7). flattenArrangement already gates on it. Unknown id → unchanged. */
+export function toggleTrackMuted(arr: Arrangement, trackId: string): Arrangement {
+  if (!arr.tracks.some((t) => t.id === trackId)) return arr;
+  return { ...arr, tracks: arr.tracks.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t)) };
+}
+
+/** Toggle a track's solo (US-8). flattenArrangement: any solo ⇒ only soloed tracks play. Unknown id → unchanged. */
+export function toggleTrackSoloed(arr: Arrangement, trackId: string): Arrangement {
+  if (!arr.tracks.some((t) => t.id === trackId)) return arr;
+  return { ...arr, tracks: arr.tracks.map((t) => (t.id === trackId ? { ...t, soloed: !t.soloed } : t)) };
+}
