@@ -9,9 +9,9 @@ import { newId } from "./recordings";
 
 const STORAGE_KEY = "musicware.arrangements.v1";
 
-// Distinct lane colours so the three default tracks read as separate places to
-// stack bricks (the building-block recombination the workspace exists for).
-const TRACK_COLORS = ["#7c5cff", "#1fa8a0", "#e06a8b"];
+// Distinct lane colours so tracks read as separate places to stack bricks (the
+// building-block recombination the workspace exists for). Exported so the UI can cycle.
+export const TRACK_PALETTE = ["#7c5cff", "#1fa8a0", "#e06a8b", "#f5a623", "#4f86f7", "#46c66d"];
 
 function makeDefaultTrack(n: number, color: string): Track {
   return {
@@ -33,7 +33,7 @@ export function newArrangement(): Arrangement {
     createdAt: Date.now(),
     tempoBpm: 120,
     timeSig: [4, 4],
-    tracks: TRACK_COLORS.map((c, i) => makeDefaultTrack(i + 1, c)),
+    tracks: TRACK_PALETTE.slice(0, 3).map((c, i) => makeDefaultTrack(i + 1, c)),
     sections: [],
   };
 }
@@ -113,4 +113,43 @@ export function moveClip(arr: Arrangement, clipId: string, startMs: number): Arr
     };
   });
   return found ? { ...arr, tracks } : arr;
+}
+
+// ---- Track management (Slice 3, US-3/4/5/6/10) — all pure/immutable, unknown-id safe ----
+
+/** Append a new empty track (next palette colour, next number). */
+export function addTrack(arr: Arrangement): Arrangement {
+  const n = arr.tracks.length;
+  const color = TRACK_PALETTE[n % TRACK_PALETTE.length];
+  return { ...arr, tracks: [...arr.tracks, makeDefaultTrack(n + 1, color)] };
+}
+
+/** Rename a track. Empty/whitespace names and unknown ids are ignored (unchanged). */
+export function renameTrack(arr: Arrangement, trackId: string, name: string): Arrangement {
+  const trimmed = name.trim();
+  if (!trimmed || !arr.tracks.some((t) => t.id === trackId)) return arr;
+  return { ...arr, tracks: arr.tracks.map((t) => (t.id === trackId ? { ...t, name: trimmed } : t)) };
+}
+
+/** Set a track's colour. Unknown id → unchanged. */
+export function setTrackColor(arr: Arrangement, trackId: string, color: string): Arrangement {
+  if (!arr.tracks.some((t) => t.id === trackId)) return arr;
+  return { ...arr, tracks: arr.tracks.map((t) => (t.id === trackId ? { ...t, color } : t)) };
+}
+
+/** Move a track one slot up/down. Clamped at the ends; unknown id → unchanged. */
+export function reorderTrack(arr: Arrangement, trackId: string, dir: "up" | "down"): Arrangement {
+  const i = arr.tracks.findIndex((t) => t.id === trackId);
+  if (i === -1) return arr;
+  const j = dir === "up" ? i - 1 : i + 1;
+  if (j < 0 || j >= arr.tracks.length) return arr;
+  const tracks = [...arr.tracks];
+  [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+  return { ...arr, tracks };
+}
+
+/** Remove a track and its clips. Refuses to remove the last track; unknown id → unchanged. */
+export function removeTrack(arr: Arrangement, trackId: string): Arrangement {
+  if (arr.tracks.length <= 1 || !arr.tracks.some((t) => t.id === trackId)) return arr;
+  return { ...arr, tracks: arr.tracks.filter((t) => t.id !== trackId) };
 }

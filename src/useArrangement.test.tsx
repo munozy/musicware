@@ -205,3 +205,19 @@ describe("useArrangement — loads persisted arrangement on mount", () => {
     expect(result.current.arrangement.tracks[0].clips[0].recordingId).toBe(rec.id);
   });
 });
+
+describe("useArrangement — track management", () => {
+  it("addTrack appends and removeTrack removes, persisting both", () => {
+    const { result } = renderHook(() => useArrangement());
+    const initial = result.current.arrangement.tracks.length; // 3
+
+    act(() => result.current.addTrack());
+    expect(result.current.arrangement.tracks).toHaveLength(initial + 1);
+    expect(loadArrangement().tracks).toHaveLength(initial + 1);
+
+    const lastId = result.current.arrangement.tracks[initial].id;
+    act(() => result.current.removeTrack(lastId));
+    expect(result.current.arrangement.tracks).toHaveLength(initial);
+    expect(loadArrangement().tracks).toHaveLength(initial);
+  });
+});
