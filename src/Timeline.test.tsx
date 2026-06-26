@@ -57,6 +57,8 @@ describe("Timeline", () => {
       onSetTrackColor: vi.fn(),
       onReorderTrack: vi.fn(),
       onRemoveTrack: vi.fn(),
+      onToggleMute: vi.fn(),
+      onToggleSolo: vi.fn(),
     };
   });
 

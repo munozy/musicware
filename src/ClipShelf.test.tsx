@@ -13,9 +13,23 @@ const makeRec = (id: string, name: string, durationMs = 3000): Recording => ({
 
 const TRACK_IDS = ["t1", "t2", "t3"];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const renderShelf = (recs: Recording[], onPlaceClip: any = vi.fn()) =>
-  render(<ClipShelf recordings={recs} trackIds={TRACK_IDS} onPlaceClip={onPlaceClip} />);
+const renderShelf = (
+  recs: Recording[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPlaceClip: any = vi.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPreview: any = vi.fn(),
+  previewingId: string | null = null,
+) =>
+  render(
+    <ClipShelf
+      recordings={recs}
+      trackIds={TRACK_IDS}
+      onPlaceClip={onPlaceClip}
+      onPreview={onPreview}
+      previewingId={previewingId}
+    />,
+  );
 
 describe("ClipShelf", () => {
   it("renders each recording as a draggable card", () => {
@@ -56,6 +70,19 @@ describe("ClipShelf", () => {
 
     // announces the placement for screen readers
     expect(screen.getByTestId("shelf-announce").textContent).toMatch(/Placed Comp 1 on track 1/);
+  });
+
+  it("the ▶ button previews the recording", () => {
+    const onPreview = vi.fn();
+    renderShelf([makeRec("r1", "Comp 1")], vi.fn(), onPreview);
+    fireEvent.click(screen.getByRole("button", { name: /preview comp 1/i }));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onPreview.mock.calls[0][0].id).toBe("r1");
+  });
+
+  it("shows a stop affordance for the recording being previewed", () => {
+    renderShelf([makeRec("r1", "Comp 1")], vi.fn(), vi.fn(), "r1");
+    expect(screen.getByRole("button", { name: /stop preview of comp 1/i })).toBeDefined();
   });
 
   it("shows an empty state when there are no recordings", () => {

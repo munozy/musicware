@@ -244,3 +244,23 @@ describe("useArrangement — removeClip + playhead timing", () => {
     expect(result.current.playStartedAt).toBeNull();
   });
 });
+
+describe("useArrangement — mute/solo + preview", () => {
+  it("toggleMute / toggleSolo flip the track flags", () => {
+    const { result } = renderHook(() => useArrangement());
+    const id = result.current.arrangement.tracks[0].id;
+    act(() => result.current.toggleMute(id));
+    expect(result.current.arrangement.tracks[0].muted).toBe(true);
+    act(() => result.current.toggleSolo(id));
+    expect(result.current.arrangement.tracks[0].soloed).toBe(true);
+  });
+
+  it("previewRecording sets previewingId; clicking the same one again stops it", () => {
+    const { result } = renderHook(() => useArrangement());
+    const rec = makeRec("r1");
+    act(() => result.current.previewRecording(rec));
+    expect(result.current.previewingId).toBe("r1");
+    act(() => result.current.previewRecording(rec)); // toggle off
+    expect(result.current.previewingId).toBeNull();
+  });
+});

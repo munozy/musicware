@@ -13,9 +13,13 @@ type Props = {
   /** Track ids in lane order — keyboard keys 1/2/3 map onto these. */
   trackIds: string[];
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
+  /** Preview-play a recording (toggle: clicking the playing one stops it). */
+  onPreview: (rec: Recording) => void;
+  /** Id of the recording currently previewing, or null. */
+  previewingId: string | null;
 };
 
-export default function ClipShelf({ recordings, trackIds, onPlaceClip }: Props) {
+export default function ClipShelf({ recordings, trackIds, onPlaceClip, onPreview, previewingId }: Props) {
   const [announce, setAnnounce] = useState("");
 
   const handleDragStart = (e: React.DragEvent<HTMLElement>, id: string) => {
@@ -59,6 +63,19 @@ export default function ClipShelf({ recordings, trackIds, onPlaceClip }: Props) 
               onKeyDown={(e) => handleKeyDown(e, rec)}
               title="Drag to the timeline, or press 1, 2 or 3"
             >
+              <button
+                className={`clip-card-play${previewingId === rec.id ? " playing" : ""}`}
+                aria-label={previewingId === rec.id ? `Stop preview of ${rec.name}` : `Preview ${rec.name}`}
+                title={previewingId === rec.id ? "Stop" : "Preview"}
+                draggable={false}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPreview(rec);
+                }}
+              >
+                {previewingId === rec.id ? "■" : "▶"}
+              </button>
               <span className="clip-card-name">{rec.name}</span>
               <span className="clip-card-dur">{formatDuration(rec.durationMs)}</span>
             </li>
