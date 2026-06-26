@@ -1,13 +1,16 @@
 /**
  * Timeline — ruler + track lanes + clip blocks + static playhead.
  *
- * Drop math (the flagged px→ms risk):
+ * Drop math (the px→ms risk, pure-tested in timeScale):
  *   PX_PER_SEC = 40  →  pxPerMs = 40 / 1000 = 0.04
- *   offsetPx  = clientX − lane.getBoundingClientRect().left
+ *   offsetPx  = clamp(clientX − lane.left [− grabOffset for a move], 0, lane.width)
  *   startMs   = snapMs(pxToMs(offsetPx, pxPerMs), SNAP_MS)
  *
- * SNAP_MS = 100 keeps Slice 1 usable while snapping is a Slice 7 feature.
- * The Timeline exports PX_PER_SEC so tests and SongView can reference it.
+ * Two drop payloads on text/plain:
+ *   "clip:<recordingId>"            — a new clip dragged from the shelf
+ *   "move:<clipId>:<grabOffsetPx>"  — an existing clip dragged within the timeline
+ * Placed clips are also keyboard-movable (focus + Left/Right arrows).
+ * SNAP_MS = 100 keeps Slice 1/2 usable; the full bar/beat grid is Slice 7.
  */
 
 import { useRef } from "react";
@@ -19,7 +22,6 @@ export const PX_PER_SEC = 40;
 const PX_PER_MS = PX_PER_SEC / 1000;
 const SNAP_MS = 100;
 
-// Ruler tick interval in ms (every 1 second for Slice 1).
 const RULER_TICK_MS = 1000;
 const RULER_WIDTH_MS = 30_000; // show 30 seconds of ruler
 
@@ -28,20 +30,52 @@ type Props = {
   recordings: Recording[];
   isPlaying: boolean;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
+  onMoveClip: (clipId: string, startMs: number) => void;
 };
 
-function ClipBlock({ clip, recordings }: { clip: ClipInstance; recordings: Recording[] }) {
+function ClipBlock({
+  clip,
+  recordings,
+  onMoveClip,
+}: {
+  clip: ClipInstance;
+  recordings: Recording[];
+  onMoveClip: (clipId: string, startMs: number) => void;
+}) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
+  const name = rec?.name ?? clip.recordingId;
   const widthPx = rec ? Math.max(4, msToPx(rec.durationMs, PX_PER_MS)) : 4;
   const leftPx = msToPx(clip.startMs, PX_PER_MS);
+
+  const handleDragStart = (e: React.DragEvent) => {
+    const grabOffsetPx = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    e.dataTransfer.setData("text/plain", `move:${clip.id}:${Math.max(0, grabOffsetPx)}`);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      onMoveClip(clip.id, clip.startMs - SNAP_MS); // store clamps >= 0
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      onMoveClip(clip.id, clip.startMs + SNAP_MS);
+    }
+  };
 
   return (
     <div
       className="timeline-clip"
       style={{ left: leftPx, width: widthPx }}
-      title={rec?.name ?? clip.recordingId}
+      title={name}
+      draggable
+      onDragStart={handleDragStart}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="button"
+      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds. Drag, or use Left and Right arrows to move.`}
     >
-      <span className="timeline-clip-label">{rec?.name ?? clip.recordingId}</span>
+      <span className="timeline-clip-label">{name}</span>
     </div>
   );
 }
@@ -50,30 +84,45 @@ function TrackLane({
   trackId,
   clips,
   recordings,
-  onDrop,
+  onPlaceClip,
+  onMoveClip,
 }: {
   trackId: string;
   clips: ClipInstance[];
   recordings: Recording[];
-  onDrop: (trackId: string, recordingId: string, startMs: number) => void;
+  onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
+  onMoveClip: (clipId: string, startMs: number) => void;
 }) {
   const laneRef = useRef<HTMLDivElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    // dropEffect may not be settable in jsdom; guard defensively.
-    try { e.dataTransfer.dropEffect = "copy"; } catch { /* jsdom */ }
+    try {
+      e.dataTransfer.dropEffect = "copy";
+    } catch {
+      /* jsdom */
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const payload = e.dataTransfer.getData("text/plain");
-    if (!payload.startsWith("clip:")) return;
-    const recordingId = payload.slice("clip:".length);
     const rect = laneRef.current?.getBoundingClientRect();
-    const offsetPx = rect ? e.clientX - rect.left : 0;
-    const startMs = snapMs(pxToMs(Math.max(0, offsetPx), PX_PER_MS), SNAP_MS);
-    onDrop(trackId, recordingId, startMs);
+    const laneLeft = rect ? rect.left : 0;
+    const laneWidth = rect ? rect.width : Number.POSITIVE_INFINITY;
+
+    if (payload.startsWith("clip:")) {
+      const recordingId = payload.slice("clip:".length);
+      const offsetPx = Math.min(Math.max(0, e.clientX - laneLeft), laneWidth);
+      onPlaceClip(trackId, recordingId, snapMs(pxToMs(offsetPx, PX_PER_MS), SNAP_MS));
+    } else if (payload.startsWith("move:")) {
+      const rest = payload.slice("move:".length);
+      const sep = rest.lastIndexOf(":");
+      const clipId = sep >= 0 ? rest.slice(0, sep) : rest;
+      const grabOffsetPx = sep >= 0 ? Number(rest.slice(sep + 1)) || 0 : 0;
+      const leftPx = Math.min(Math.max(0, e.clientX - laneLeft - grabOffsetPx), laneWidth);
+      onMoveClip(clipId, snapMs(pxToMs(leftPx, PX_PER_MS), SNAP_MS));
+    }
   };
 
   return (
@@ -85,7 +134,7 @@ function TrackLane({
       onDrop={handleDrop}
     >
       {clips.map((clip) => (
-        <ClipBlock key={clip.id} clip={clip} recordings={recordings} />
+        <ClipBlock key={clip.id} clip={clip} recordings={recordings} onMoveClip={onMoveClip} />
       ))}
     </div>
   );
@@ -105,7 +154,13 @@ function Ruler() {
   return <div className="timeline-ruler">{ticks}</div>;
 }
 
-export default function Timeline({ arrangement, recordings, isPlaying, onPlaceClip }: Props) {
+export default function Timeline({
+  arrangement,
+  recordings,
+  isPlaying,
+  onPlaceClip,
+  onMoveClip,
+}: Props) {
   return (
     <div className="timeline" role="region" aria-label="Timeline">
       <Ruler />
@@ -119,16 +174,14 @@ export default function Timeline({ arrangement, recordings, isPlaying, onPlaceCl
               trackId={track.id}
               clips={track.clips}
               recordings={recordings}
-              onDrop={onPlaceClip}
+              onPlaceClip={onPlaceClip}
+              onMoveClip={onMoveClip}
             />
           </div>
         ))}
       </div>
       {/* Static playhead — becomes animated in Slice 7 */}
-      <div
-        className={`timeline-playhead${isPlaying ? " playing" : ""}`}
-        aria-hidden="true"
-      />
+      <div className={`timeline-playhead${isPlaying ? " playing" : ""}`} aria-hidden="true" />
     </div>
   );
 }

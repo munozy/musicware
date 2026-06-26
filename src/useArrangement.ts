@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flattenArrangement, playArrangement, type Arrangement, type Player } from "./arrangement";
-import { loadArrangement, saveArrangement, addClip } from "./arrangementStore";
+import { loadArrangement, saveArrangement, addClip, moveClip as moveClipStore } from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
 
@@ -24,6 +24,11 @@ export function useArrangement() {
   /** Place a recording clip on a track at an absolute ms position. */
   const placeClip = useCallback((trackId: string, recordingId: string, startMs: number) => {
     setArrangement((prev) => addClip(prev, trackId, recordingId, startMs));
+  }, []);
+
+  /** Move an already-placed clip to a new time (clamped >= 0). The headline edit (US-12). */
+  const moveClip = useCallback((clipId: string, startMs: number) => {
+    setArrangement((prev) => moveClipStore(prev, clipId, startMs));
   }, []);
 
   /** Internal stop — releases all held notes and clears state. */
@@ -79,6 +84,7 @@ export function useArrangement() {
     arrangement,
     isPlaying,
     placeClip,
+    moveClip,
     play,
     stop,
   };

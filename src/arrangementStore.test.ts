@@ -4,6 +4,7 @@ import {
   saveArrangement,
   newArrangement,
   addClip,
+  moveClip,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -130,5 +131,36 @@ describe("addClip", () => {
     expect(n2.tracks[0].clips).toHaveLength(2);
     expect(n2.tracks[0].clips[0].recordingId).toBe("r1");
     expect(n2.tracks[0].clips[1].recordingId).toBe("r2");
+  });
+});
+
+describe("moveClip", () => {
+  const seed = () => {
+    const arr = newArrangement();
+    const trackId = arr.tracks[0].id;
+    const withClip = addClip(arr, trackId, "rec-1", 1000);
+    return { arr: withClip, clipId: withClip.tracks[0].clips[0].id };
+  };
+
+  it("moves a clip to a new startMs (finds it across tracks)", () => {
+    const { arr, clipId } = seed();
+    const next = moveClip(arr, clipId, 4000);
+    expect(next.tracks[0].clips[0].startMs).toBe(4000);
+  });
+
+  it("clamps a negative target to 0", () => {
+    const { arr, clipId } = seed();
+    expect(moveClip(arr, clipId, -500).tracks[0].clips[0].startMs).toBe(0);
+  });
+
+  it("is immutable — the original arrangement is unchanged", () => {
+    const { arr, clipId } = seed();
+    moveClip(arr, clipId, 9999);
+    expect(arr.tracks[0].clips[0].startMs).toBe(1000);
+  });
+
+  it("returns the arrangement unchanged for an unknown clipId", () => {
+    const { arr } = seed();
+    expect(moveClip(arr, "no-such-clip", 4000)).toBe(arr);
   });
 });

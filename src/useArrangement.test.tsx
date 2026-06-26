@@ -63,6 +63,18 @@ describe("useArrangement — placeClip + persistence", () => {
 
     expect(result.current.arrangement.tracks[0].clips).toHaveLength(2);
   });
+
+  it("moveClip repositions a placed clip and persists the new startMs", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+
+    act(() => result.current.placeClip(trackId, "r1", 1000));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+    act(() => result.current.moveClip(clipId, 3000));
+
+    expect(result.current.arrangement.tracks[0].clips[0].startMs).toBe(3000);
+    expect(loadArrangement().tracks[0].clips[0].startMs).toBe(3000);
+  });
 });
 
 describe("useArrangement — play/stop", () => {

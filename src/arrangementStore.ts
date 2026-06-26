@@ -95,3 +95,22 @@ export function addClip(
 
   return { ...arr, tracks: updatedTracks };
 }
+
+/**
+ * Return a new arrangement with the given clip moved to `startMs` (clamped >= 0).
+ * Pure/immutable; finds the clip across all tracks. Time-only — the clip stays on
+ * its track (cross-track move is a later slice). Unknown clipId → unchanged.
+ */
+export function moveClip(arr: Arrangement, clipId: string, startMs: number): Arrangement {
+  const at = Math.max(0, Math.round(startMs));
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => c.id === clipId)) return t;
+    found = true;
+    return {
+      ...t,
+      clips: t.clips.map((c) => (c.id === clipId ? { ...c, startMs: at } : c)),
+    };
+  });
+  return found ? { ...arr, tracks } : arr;
+}
