@@ -17,7 +17,19 @@ type Props = {
 };
 
 export default function SongView({ recordings, onGoToPlay }: Props) {
-  const { arrangement, isPlaying, placeClip, moveClip, play, stop } = useArrangement();
+  const {
+    arrangement,
+    isPlaying,
+    placeClip,
+    moveClip,
+    addTrack,
+    renameTrack,
+    setTrackColor,
+    reorderTrack,
+    removeTrack,
+    play,
+    stop,
+  } = useArrangement();
 
   if (recordings.length === 0) {
     return (
@@ -54,6 +66,13 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
           isPlaying={isPlaying}
           onPlaceClip={placeClip}
           onMoveClip={moveClip}
+          trackOps={{
+            onAddTrack: addTrack,
+            onRenameTrack: renameTrack,
+            onSetTrackColor: setTrackColor,
+            onReorderTrack: reorderTrack,
+            onRemoveTrack: removeTrack,
+          }}
         />
       </div>
     </div>

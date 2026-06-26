@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flattenArrangement, playArrangement, type Arrangement, type Player } from "./arrangement";
-import { loadArrangement, saveArrangement, addClip, moveClip as moveClipStore } from "./arrangementStore";
+import {
+  loadArrangement,
+  saveArrangement,
+  addClip,
+  moveClip as moveClipStore,
+  addTrack as addTrackStore,
+  renameTrack as renameTrackStore,
+  setTrackColor as setTrackColorStore,
+  reorderTrack as reorderTrackStore,
+  removeTrack as removeTrackStore,
+} from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
 
@@ -30,6 +40,25 @@ export function useArrangement() {
   const moveClip = useCallback((clipId: string, startMs: number) => {
     setArrangement((prev) => moveClipStore(prev, clipId, startMs));
   }, []);
+
+  /** Track management (Slice 3, US-3/4/5/6/10). */
+  const addTrack = useCallback(() => setArrangement((prev) => addTrackStore(prev)), []);
+  const renameTrack = useCallback(
+    (trackId: string, name: string) => setArrangement((prev) => renameTrackStore(prev, trackId, name)),
+    [],
+  );
+  const setTrackColor = useCallback(
+    (trackId: string, color: string) => setArrangement((prev) => setTrackColorStore(prev, trackId, color)),
+    [],
+  );
+  const reorderTrack = useCallback(
+    (trackId: string, dir: "up" | "down") => setArrangement((prev) => reorderTrackStore(prev, trackId, dir)),
+    [],
+  );
+  const removeTrack = useCallback(
+    (trackId: string) => setArrangement((prev) => removeTrackStore(prev, trackId)),
+    [],
+  );
 
   /** Internal stop — releases all held notes and clears state. */
   const stopInternal = useCallback(() => {
@@ -85,6 +114,11 @@ export function useArrangement() {
     isPlaying,
     placeClip,
     moveClip,
+    addTrack,
+    renameTrack,
+    setTrackColor,
+    reorderTrack,
+    removeTrack,
     play,
     stop,
   };

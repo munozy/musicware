@@ -5,6 +5,11 @@ import {
   newArrangement,
   addClip,
   moveClip,
+  addTrack,
+  renameTrack,
+  setTrackColor,
+  reorderTrack,
+  removeTrack,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -162,5 +167,54 @@ describe("moveClip", () => {
   it("returns the arrangement unchanged for an unknown clipId", () => {
     const { arr } = seed();
     expect(moveClip(arr, "no-such-clip", 4000)).toBe(arr);
+  });
+});
+
+describe("track management", () => {
+  it("addTrack appends a track with the next name and an empty clip list (immutable)", () => {
+    const arr = newArrangement(); // 3 tracks
+    const next = addTrack(arr);
+    expect(next.tracks).toHaveLength(4);
+    expect(next.tracks[3].name).toBe("Track 4");
+    expect(next.tracks[3].clips).toEqual([]);
+    expect(arr.tracks).toHaveLength(3); // original unchanged
+  });
+
+  it("renameTrack trims the name; ignores empty/whitespace and unknown ids", () => {
+    const arr = newArrangement();
+    const id = arr.tracks[0].id;
+    expect(renameTrack(arr, id, "  Bass  ").tracks[0].name).toBe("Bass");
+    expect(renameTrack(arr, id, "   ")).toBe(arr); // empty → unchanged (same ref)
+    expect(renameTrack(arr, "nope", "X")).toBe(arr); // unknown → unchanged
+  });
+
+  it("setTrackColor sets the colour; unknown id unchanged", () => {
+    const arr = newArrangement();
+    const id = arr.tracks[1].id;
+    expect(setTrackColor(arr, id, "#abcdef").tracks[1].color).toBe("#abcdef");
+    expect(setTrackColor(arr, "nope", "#abcdef")).toBe(arr);
+  });
+
+  it("reorderTrack swaps with the neighbour and clamps at the ends", () => {
+    const arr = newArrangement();
+    const [a, b, c] = arr.tracks.map((t) => t.id);
+    expect(reorderTrack(arr, a, "down").tracks.map((t) => t.id)).toEqual([b, a, c]);
+    expect(reorderTrack(arr, c, "up").tracks.map((t) => t.id)).toEqual([a, c, b]);
+    expect(reorderTrack(arr, a, "up")).toBe(arr); // already first
+    expect(reorderTrack(arr, c, "down")).toBe(arr); // already last
+    expect(reorderTrack(arr, "nope", "up")).toBe(arr);
+  });
+
+  it("removeTrack removes a track but refuses to remove the last one", () => {
+    const arr = newArrangement(); // 3 tracks
+    const id = arr.tracks[0].id;
+    const removed = removeTrack(arr, id);
+    expect(removed.tracks).toHaveLength(2);
+    expect(removed.tracks.some((t) => t.id === id)).toBe(false);
+    expect(arr.tracks).toHaveLength(3); // immutable
+
+    const single = { ...arr, tracks: [arr.tracks[0]] };
+    expect(removeTrack(single, single.tracks[0].id)).toBe(single); // refuses the last track
+    expect(removeTrack(arr, "nope")).toBe(arr); // unknown id unchanged
   });
 });

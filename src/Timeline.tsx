@@ -17,6 +17,7 @@ import { useRef } from "react";
 import type { Arrangement, ClipInstance } from "./arrangement";
 import type { Recording } from "./recordings";
 import { pxToMs, msToPx, snapMs } from "./timeScale";
+import TrackHeader from "./TrackHeader";
 
 export const PX_PER_SEC = 40;
 const PX_PER_MS = PX_PER_SEC / 1000;
@@ -25,12 +26,21 @@ const SNAP_MS = 100;
 const RULER_TICK_MS = 1000;
 const RULER_WIDTH_MS = 30_000; // show 30 seconds of ruler
 
+export type TrackOps = {
+  onAddTrack: () => void;
+  onRenameTrack: (trackId: string, name: string) => void;
+  onSetTrackColor: (trackId: string, color: string) => void;
+  onReorderTrack: (trackId: string, dir: "up" | "down") => void;
+  onRemoveTrack: (trackId: string) => void;
+};
+
 type Props = {
   arrangement: Arrangement;
   recordings: Recording[];
   isPlaying: boolean;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   onMoveClip: (clipId: string, startMs: number) => void;
+  trackOps: TrackOps;
 };
 
 function ClipBlock({
@@ -160,16 +170,23 @@ export default function Timeline({
   isPlaying,
   onPlaceClip,
   onMoveClip,
+  trackOps,
 }: Props) {
   return (
     <div className="timeline" role="region" aria-label="Timeline">
       <Ruler />
       <div className="timeline-tracks">
-        {arrangement.tracks.map((track) => (
+        {arrangement.tracks.map((track, i) => (
           <div key={track.id} className="timeline-track-row">
-            <div className="timeline-track-label" style={{ background: track.color }}>
-              {track.name}
-            </div>
+            <TrackHeader
+              track={track}
+              index={i}
+              trackCount={arrangement.tracks.length}
+              onRename={trackOps.onRenameTrack}
+              onSetColor={trackOps.onSetTrackColor}
+              onReorder={trackOps.onReorderTrack}
+              onRemove={trackOps.onRemoveTrack}
+            />
             <TrackLane
               trackId={track.id}
               clips={track.clips}
@@ -180,6 +197,9 @@ export default function Timeline({
           </div>
         ))}
       </div>
+      <button className="timeline-add-track" onClick={trackOps.onAddTrack}>
+        + Add track
+      </button>
       {/* Static playhead — becomes animated in Slice 7 */}
       <div className={`timeline-playhead${isPlaying ? " playing" : ""}`} aria-hidden="true" />
     </div>
