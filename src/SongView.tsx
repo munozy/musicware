@@ -17,7 +17,7 @@ type Props = {
 };
 
 export default function SongView({ recordings, onGoToPlay }: Props) {
-  const { arrangement, isPlaying, placeClip, play, stop } = useArrangement();
+  const { arrangement, isPlaying, placeClip, moveClip, play, stop } = useArrangement();
 
   if (recordings.length === 0) {
     return (
@@ -43,12 +43,17 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
         recordings={recordings}
       />
       <div className="song-body">
-        <ClipShelf recordings={recordings} />
+        <ClipShelf
+          recordings={recordings}
+          trackIds={arrangement.tracks.map((t) => t.id)}
+          onPlaceClip={placeClip}
+        />
         <Timeline
           arrangement={arrangement}
           recordings={recordings}
           isPlaying={isPlaying}
           onPlaceClip={placeClip}
+          onMoveClip={moveClip}
         />
       </div>
     </div>
