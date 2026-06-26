@@ -7,6 +7,12 @@
  * All functions guard against non-positive scales and negative positions.
  */
 
+/** Timeline layout constants (shared by Timeline + Playhead to avoid a circular import). */
+export const PX_PER_SEC = 40;
+export const PX_PER_MS = PX_PER_SEC / 1000;
+/** Left offset of the lane origin in px (must match the .track-header width in App.css). */
+export const LANE_ORIGIN_PX = 168;
+
 /** Convert a pixel x-offset to a timeline position in milliseconds. */
 export function pxToMs(px: number, pxPerMs: number): number {
   if (pxPerMs <= 0 || px <= 0) return 0;

@@ -153,3 +153,14 @@ export function removeTrack(arr: Arrangement, trackId: string): Arrangement {
   if (arr.tracks.length <= 1 || !arr.tracks.some((t) => t.id === trackId)) return arr;
   return { ...arr, tracks: arr.tracks.filter((t) => t.id !== trackId) };
 }
+
+/** Remove a placed clip from whatever track holds it. Pure/immutable; unknown id → unchanged. */
+export function removeClip(arr: Arrangement, clipId: string): Arrangement {
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => c.id === clipId)) return t;
+    found = true;
+    return { ...t, clips: t.clips.filter((c) => c.id !== clipId) };
+  });
+  return found ? { ...arr, tracks } : arr;
+}

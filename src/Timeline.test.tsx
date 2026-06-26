@@ -42,12 +42,15 @@ describe("Timeline", () => {
   let onMoveClip: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onAddTrack: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onRemoveClip: any;
   let trackOps: TrackOps;
 
   beforeEach(() => {
     onPlaceClip = vi.fn();
     onMoveClip = vi.fn();
     onAddTrack = vi.fn();
+    onRemoveClip = vi.fn();
     trackOps = {
       onAddTrack,
       onRenameTrack: vi.fn(),
@@ -63,8 +66,10 @@ describe("Timeline", () => {
         arrangement={arr}
         recordings={recordings}
         isPlaying={false}
+        playStartedAt={null}
         onPlaceClip={onPlaceClip}
         onMoveClip={onMoveClip}
+        onRemoveClip={onRemoveClip}
         trackOps={trackOps}
       />,
     );
@@ -135,11 +140,25 @@ describe("Timeline", () => {
   it("a focused placed clip moves with Left/Right arrow keys (keyboard nudge)", () => {
     const { arr } = withClip(1000);
     renderTL(arr, [makeRec("r1")]);
-    const block = screen.getByRole("button", { name: /r1 clip/i });
+    const block = screen.getByRole("button", { name: /r1 clip at/i });
     fireEvent.keyDown(block, { key: "ArrowRight" });
     expect(onMoveClip).toHaveBeenLastCalledWith("clip-1", 1100);
     fireEvent.keyDown(block, { key: "ArrowLeft" });
     expect(onMoveClip).toHaveBeenLastCalledWith("clip-1", 900);
+  });
+
+  it("the clip ✕ button removes the clip", () => {
+    const { arr } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.click(screen.getByRole("button", { name: /remove r1 clip/i }));
+    expect(onRemoveClip).toHaveBeenCalledWith("clip-1");
+  });
+
+  it("Delete on a focused clip removes it", () => {
+    const { arr } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.keyDown(screen.getByRole("button", { name: /r1 clip at/i }), { key: "Delete" });
+    expect(onRemoveClip).toHaveBeenCalledWith("clip-1");
   });
 
   it("the + Add track button calls onAddTrack", () => {

@@ -20,8 +20,10 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
   const {
     arrangement,
     isPlaying,
+    playStartedAt,
     placeClip,
     moveClip,
+    removeClip,
     addTrack,
     renameTrack,
     setTrackColor,
@@ -64,8 +66,10 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
           arrangement={arrangement}
           recordings={recordings}
           isPlaying={isPlaying}
+          playStartedAt={playStartedAt}
           onPlaceClip={placeClip}
           onMoveClip={moveClip}
+          onRemoveClip={removeClip}
           trackOps={{
             onAddTrack: addTrack,
             onRenameTrack: renameTrack,

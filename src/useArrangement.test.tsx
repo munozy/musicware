@@ -221,3 +221,26 @@ describe("useArrangement — track management", () => {
     expect(loadArrangement().tracks).toHaveLength(initial);
   });
 });
+
+describe("useArrangement — removeClip + playhead timing", () => {
+  it("removeClip removes a placed clip", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+    act(() => result.current.removeClip(clipId));
+    expect(result.current.arrangement.tracks[0].clips).toHaveLength(0);
+  });
+
+  it("sets playStartedAt on play and clears it on stop", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const rec = makeRec("r1");
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    expect(result.current.playStartedAt).toBeNull();
+    act(() => result.current.play([rec]));
+    expect(result.current.playStartedAt).not.toBeNull();
+    act(() => result.current.stop());
+    expect(result.current.playStartedAt).toBeNull();
+  });
+});
