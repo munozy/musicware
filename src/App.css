@@ -936,7 +936,7 @@ kbd {
 }
 
 .timeline-tracks {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
@@ -1096,6 +1096,8 @@ kbd {
 }
 .timeline-add-track {
   margin: 8px 6px;
+  align-self: flex-start;
+  flex-shrink: 0;
   background: rgba(124, 92, 255, 0.15);
   color: inherit;
   border: 1px dashed rgba(124, 92, 255, 0.6);
