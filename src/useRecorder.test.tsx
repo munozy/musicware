@@ -155,20 +155,54 @@ describe("useRecorder — playback", () => {
     expect(result.current.playingId).toBeNull();
   });
 
-  it("tracks playback progress 0→1 as a take plays", () => {
+  it("tracks playback progress 0→1 over the TRIMMED span (not the raw duration)", () => {
     const { result } = renderHook(() => useRecorder());
     act(() => result.current.startRecording());
     setNow(100);
-    act(() => synth.noteOn(62));
+    act(() => synth.noteOn(62)); // first (and only) note at 100ms — 100ms of leading silence
     setNow(300);
-    act(() => result.current.stopRecording()); // duration 300ms
+    act(() => result.current.stopRecording()); // held note closes at 300; durationMs 300
     const id = result.current.recordings[0].id;
 
     act(() => result.current.play(id)); // start = performance.now() = 300
     expect(result.current.playProgress).toBe(0);
-    setNow(450); // 150ms into a 300ms take
+    setNow(400); // 100ms in; trimmed span is 200ms (off@300 − on@100), so 100/200 = 0.5
     act(() => vi.advanceTimersByTime(50)); // progress interval fires
     expect(result.current.playProgress).toBeCloseTo(0.5, 2);
+  });
+
+  it("trims LEADING silence — the first note fires immediately, not after the gap", () => {
+    const { result } = renderHook(() => useRecorder());
+    act(() => result.current.startRecording());
+    setNow(500);
+    act(() => synth.noteOn(60)); // 500ms of dead air before the first note
+    setNow(700);
+    act(() => synth.noteOff(60));
+    setNow(2000);
+    act(() => result.current.stopRecording());
+    const id = result.current.recordings[0].id;
+    vi.mocked(invoke).mockClear();
+
+    act(() => result.current.play(id));
+    act(() => vi.advanceTimersByTime(1)); // barely any time — yet the note should already sound
+    expect(calls()).toContainEqual(["note_on", { note: 60 }]); // leading 500ms skipped
+  });
+
+  it("trims TRAILING silence — playback ends just after the last note, not at the stop time", () => {
+    const { result } = renderHook(() => useRecorder());
+    act(() => result.current.startRecording());
+    setNow(500);
+    act(() => synth.noteOn(60));
+    setNow(700);
+    act(() => synth.noteOff(60)); // last note ends at 700ms…
+    setNow(2000);
+    act(() => result.current.stopRecording()); // …but the user stopped 1.3s later
+    const id = result.current.recordings[0].id;
+
+    act(() => result.current.play(id));
+    act(() => vi.advanceTimersByTime(250)); // span is 200ms (700−500), end marker at 201
+    expect(calls()).toContainEqual(["note_off", { note: 60 }]);
+    expect(result.current.playingId).toBeNull(); // ended at ~201ms, not durationMs+1 (2001ms)
   });
 
   it("releases sounding notes when the hook unmounts mid-playback (no stranded voice)", () => {

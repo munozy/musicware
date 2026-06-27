@@ -114,20 +114,38 @@ export function useRecorder() {
       if (!rec) return;
       setPlayingId(id);
       setPlayProgress(0);
+
+      // Trim dead air so playback feels tight: skip the gap before the first note
+      // (leading silence — the user waited before playing) and stop right after the
+      // last note instead of at the stop-button time (trailing silence — the user
+      // waited before stopping). Non-destructive: the stored take and its durationMs
+      // are untouched, so the Song arrangement still uses the raw timings.
+      let offset = Infinity; // time of the first note-on
+      let lastT = 0; // time of the last audible event (on/off)
+      for (const ev of rec.events) {
+        if (ev.kind === "on") offset = Math.min(offset, ev.t);
+        if (ev.kind === "on" || ev.kind === "off") lastT = Math.max(lastT, ev.t);
+      }
+      if (!Number.isFinite(offset)) offset = 0; // defensive: a take with no notes plays from 0
+      const span = Math.max(0, lastT - offset);
+
       const start = performance.now();
-      const dur = Math.max(1, rec.durationMs);
+      const dur = Math.max(1, span);
       progressTimerRef.current = setInterval(() => {
         setPlayProgress(Math.min(1, (performance.now() - start) / dur));
       }, 50);
       for (const ev of rec.events) {
+        // The t=0 preset stamp (and any event before the first note) clamps to 0, so the
+        // timbre is set the instant playback starts, right before the first note sounds.
+        const at = Math.max(0, ev.t - offset);
         const handle = setTimeout(() => {
           emit(ev);
           if (ev.kind === "on") playNotesRef.current.add(ev.note);
           else if (ev.kind === "off") playNotesRef.current.delete(ev.note);
-        }, ev.t);
+        }, at);
         timeoutsRef.current.push(handle);
       }
-      // Drop the playing flag just after the final event.
+      // Drop the playing flag just after the final (shifted) event.
       const end = setTimeout(() => {
         timeoutsRef.current = [];
         playNotesRef.current.clear();
@@ -137,7 +155,7 @@ export function useRecorder() {
         }
         setPlayProgress(0);
         setPlayingId(null);
-      }, rec.durationMs + 1);
+      }, span + 1);
       timeoutsRef.current.push(end);
     },
     [isRecording, recordings, clearPlayback],
