@@ -28,6 +28,15 @@ existing `set_preset`-before-`note_on` ordering means each note captures the pre
 This is the simpler of ADR-0007's two V2a options (capture-at-note-on vs tagging every `NoteEvent` with a
 preset); it reuses the per-voice capture already proven in-tree for the drum branch (ADR-0005).
 
+**Scheduler addendum (2026-06-27, completes this ADR).** Capture-at-note-on is only correct if every note is
+preceded by *its own* clip's `set_preset`. The scheduler originally stamped a clip's preset **once at entry**,
+so a clip's *later* notes captured whatever global preset a concurrently-started clip had set — a drum brick's
+ongoing hits turned piano the moment a piano brick began ("a brick is atomic" complaint, third #3 report).
+`flattenClip` now re-asserts the clip's tracked preset immediately before **every** note (folding in-take preset
+changes; a preset with no following note is dropped as inaudible). Cost is one extra `set_preset` per note —
+trivial (an `AtomicU8` store). Regression pinned by `arrangement.test.ts` ("a brick is ATOMIC…"). This makes the
+per-voice render correct for arbitrary interleaving without the heavier per-`NoteEvent` tagging.
+
 ## Consequences
 
 - **(+) Overlapping different-instrument clips/notes each play their own timbre** — fixes the arrangement bug

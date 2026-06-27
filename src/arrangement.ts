@@ -95,17 +95,17 @@ function flattenClip(clip: ClipInstance, rec: Recording): ScheduledEvent[] {
     .filter((e) => e.t >= ws && e.t < we)
     .sort((a, b) => a.t - b.t);
 
-  // When the window starts mid-recording, the clip's own preset stamp (usually at t=0) is
-  // filtered out. Carry the most recent preset at/before ws forward so the clip still
-  // announces its timbre when it ENTERS ("last preset wins" — ADR-0007). Re-stamped each
-  // loop iteration so interleaving with other clips can't strand it on a stale timbre.
-  let carriedPreset: number | null = null;
-  if (ws > 0) {
+  // The clip's instrument at entry: the most recent preset stamped at/before the window
+  // start (ws). For an untrimmed clip ws=0, so this is the recording's t=0 stamp (every real
+  // recording seeds one — useRecorder.ts). null only for the synthetic, preset-less
+  // recordings used in tests; those keep the old "emit no preset" behaviour.
+  let entryPreset: number | null = null;
+  {
     let bestT = -1;
     for (const e of rec.events) {
       if (e.kind === "preset" && e.t <= ws && e.t >= bestT) {
         bestT = e.t;
-        carriedPreset = e.index;
+        entryPreset = e.index;
       }
     }
   }
@@ -115,7 +115,7 @@ function flattenClip(clip: ClipInstance, rec: Recording): ScheduledEvent[] {
     // Loops advance by the (trimmed) window length, NOT durationMs — so trimmed loops abut
     // instead of overlapping (ADR-0007: windowLen == durationMs when the clip is untrimmed).
     const loopBase = startMs + k * windowLen;
-    if (carriedPreset !== null) out.push({ t: loopBase, kind: "preset", index: carriedPreset });
+    let curPreset = entryPreset; // this clip's active instrument, tracked across in-take changes
     const active = new Set<number>(); // notes turned on INSIDE this window, not yet off
     for (const e of windowEvents) {
       const at = loopBase + (e.t - ws);
@@ -123,6 +123,12 @@ function flattenClip(clip: ClipInstance, rec: Recording): ScheduledEvent[] {
         const note = clampNote(e.note + transpose);
         // A clamp collision or a faithless double-on becomes a clean retrigger.
         if (active.has(note)) out.push({ t: at, kind: "off", note });
+        // Re-assert THIS clip's instrument immediately before EVERY note. The engine captures
+        // the GLOBAL preset at note-on (ADR-0008); an interleaved clip's note overwrites that
+        // global, so without re-stamping, a brick's later notes adopt the OTHER brick's timbre
+        // (a drum brick turns piano when a piano brick starts). Stamping the clip's own preset
+        // right before each note keeps a brick atomic, whatever else is playing at the time.
+        if (curPreset !== null) out.push({ t: at, kind: "preset", index: curPreset });
         out.push({ t: at, kind: "on", note });
         active.add(note);
       } else if (e.kind === "off") {
@@ -135,7 +141,10 @@ function flattenClip(clip: ClipInstance, rec: Recording): ScheduledEvent[] {
           active.delete(note);
         }
       } else {
-        out.push({ t: at, kind: "preset", index: e.index });
+        // A preset change inside the take: fold it into the per-note re-assert above rather
+        // than emitting it standalone — a preset with no following note is inaudible (the
+        // engine only reads the global at note-on), and a standalone would just duplicate it.
+        curPreset = e.index;
       }
     }
     // Self-close: release anything THIS window opened and left held (no bleed/leak).

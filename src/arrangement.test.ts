@@ -276,7 +276,7 @@ describe("flattenArrangement — review regressions", () => {
     expect(pendingNotesAfter(ev, 500)).toEqual(new Set([60])); // r1 not killed early
   });
 
-  it("a trimmed clip still stamps its preset on entry (last preset wins)", () => {
+  it("a trimmed clip re-asserts its preset immediately before its note (last preset wins, carried past the trim)", () => {
     const r = rec("r1", 2000, [
       { t: 0, kind: "preset", index: 2 },
       { t: 1000, kind: "on", note: 67 },
@@ -286,8 +286,10 @@ describe("flattenArrangement — review regressions", () => {
       arr([track({ id: "t1", clips: [clip({ recordingId: "r1", startMs: 100, trimStartMs: 800, trimEndMs: 2000 })] })]),
       [r],
     );
-    expect(ev[0]).toEqual({ t: 100, kind: "preset", index: 2 }); // carried to the clip's entry
-    expect(ev.find((e) => e.kind === "on")).toMatchObject({ note: 67, t: 300 });
+    // The preset stamp (t=0) is trimmed out of the window, but it is carried forward and
+    // re-asserted right before the note it belongs to (at the note's time, not the clip entry).
+    expect(ev[0]).toEqual({ t: 300, kind: "preset", index: 2 });
+    expect(ev[1]).toMatchObject({ kind: "on", note: 67, t: 300 });
   });
 
   it("sequential clips of different recordings each announce their own preset", () => {
@@ -383,6 +385,40 @@ describe("flattenArrangement — review regressions", () => {
       (atZero[4] as { index: number }).index,
       (atZero[5] as { note: number }).note,
     ]).toEqual([1, 60, 2, 62, 3, 64]);
+  });
+
+  it("a brick is ATOMIC: a note that fires AFTER another brick changed the global preset still gets its OWN instrument", () => {
+    // The bug behind the third #3 report: brick A (drum, preset 4) keeps playing while
+    // brick B (piano, preset 2) starts. B's note overwrites the global preset; A's LATER
+    // note then captured piano instead of drum. The clip announces its preset only ONCE at
+    // entry, so nothing re-asserted A's drum before its second hit. Fix: every note is now
+    // immediately preceded by its OWN clip's preset, so capture-at-note-on (ADR-0008) always
+    // captures the right instrument regardless of what else is sounding.
+    const drum = rec("drum", 1200, [
+      { t: 0, kind: "preset", index: 4 },
+      { t: 0, kind: "on", note: 36 },
+      { t: 600, kind: "on", note: 38 }, // the LATER hit — fires after the piano brick starts
+    ]);
+    const piano = rec("piano", 1000, [
+      { t: 0, kind: "preset", index: 2 },
+      { t: 0, kind: "on", note: 72 },
+      { t: 1000, kind: "off", note: 72 },
+    ]);
+    const ev = flattenArrangement(
+      arr([
+        track({ id: "t1", clips: [clip({ recordingId: "drum", startMs: 0 })] }),
+        track({ id: "t2", clips: [clip({ recordingId: "piano", startMs: 500 })] }), // piano on at t=500
+      ]),
+      [drum, piano],
+    );
+    // The drum's second hit (note 38) lands at t=600, AFTER the piano note set the global to
+    // preset 2 at t=500. Its immediately-preceding event must be the DRUM preset (4), not 2.
+    const idx38 = ev.findIndex((e) => e.kind === "on" && (e as { note: number }).note === 38);
+    expect(idx38).toBeGreaterThan(0);
+    expect(ev[idx38 - 1]).toEqual({ t: 600, kind: "preset", index: 4 });
+    // And the piano note at t=500 is preceded by the PIANO preset (2) — each brick stays itself.
+    const idx72 = ev.findIndex((e) => e.kind === "on" && (e as { note: number }).note === 72);
+    expect(ev[idx72 - 1]).toEqual({ t: 500, kind: "preset", index: 2 });
   });
 });
 
