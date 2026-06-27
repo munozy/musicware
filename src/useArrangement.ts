@@ -19,6 +19,7 @@ import {
   removeClip as removeClipStore,
   toggleTrackMuted as toggleTrackMutedStore,
   toggleTrackSoloed as toggleTrackSoloedStore,
+  toggleClipMuted as toggleClipMutedStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
@@ -87,6 +88,10 @@ export function useArrangement() {
   }, []);
   const toggleSolo = useCallback((trackId: string) => {
     setArrangement((prev) => toggleTrackSoloedStore(prev, trackId));
+  }, []);
+  /** Mute / unmute a single placed clip (per-brick). */
+  const toggleClipMute = useCallback((clipId: string) => {
+    setArrangement((prev) => toggleClipMutedStore(prev, clipId));
   }, []);
 
   /** Stop any in-progress recording preview and release its notes. */
@@ -192,6 +197,7 @@ export function useArrangement() {
     removeTrack,
     toggleMute,
     toggleSolo,
+    toggleClipMute,
     previewRecording,
     stopPreview,
     play,

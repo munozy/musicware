@@ -176,3 +176,14 @@ export function toggleTrackSoloed(arr: Arrangement, trackId: string): Arrangemen
   if (!arr.tracks.some((t) => t.id === trackId)) return arr;
   return { ...arr, tracks: arr.tracks.map((t) => (t.id === trackId ? { ...t, soloed: !t.soloed } : t)) };
 }
+
+/** Toggle a single clip's mute (per-brick). flattenArrangement skips muted clips. Unknown id → unchanged. */
+export function toggleClipMuted(arr: Arrangement, clipId: string): Arrangement {
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => c.id === clipId)) return t;
+    found = true;
+    return { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, muted: !c.muted } : c)) };
+  });
+  return found ? { ...arr, tracks } : arr;
+}

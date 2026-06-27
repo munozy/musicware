@@ -28,6 +28,8 @@ export type ClipInstance = {
   loopCount: number;
   trimStartMs?: number | null;
   trimEndMs?: number | null;
+  /** Per-clip mute — a muted clip is skipped by the scheduler (independent of track mute). */
+  muted?: boolean;
 };
 
 export type Track = {
@@ -173,6 +175,7 @@ export function flattenArrangement(
     const audible = anySolo ? track.soloed : !track.muted;
     if (!audible) continue;
     for (const clip of track.clips) {
+      if (clip.muted) continue; // per-clip mute — skip this brick
       const rec = byId.get(clip.recordingId);
       if (!rec) continue; // dangling reference — skip safely
       events.push(...flattenClip(clip, rec));

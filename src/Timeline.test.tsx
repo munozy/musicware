@@ -44,6 +44,8 @@ describe("Timeline", () => {
   let onAddTrack: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onRemoveClip: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onToggleClipMute: any;
   let trackOps: TrackOps;
 
   beforeEach(() => {
@@ -51,6 +53,7 @@ describe("Timeline", () => {
     onMoveClip = vi.fn();
     onAddTrack = vi.fn();
     onRemoveClip = vi.fn();
+    onToggleClipMute = vi.fn();
     trackOps = {
       onAddTrack,
       onRenameTrack: vi.fn(),
@@ -72,6 +75,7 @@ describe("Timeline", () => {
         onPlaceClip={onPlaceClip}
         onMoveClip={onMoveClip}
         onRemoveClip={onRemoveClip}
+        onToggleClipMute={onToggleClipMute}
         trackOps={trackOps}
       />,
     );
@@ -161,6 +165,13 @@ describe("Timeline", () => {
     renderTL(arr, [makeRec("r1")]);
     fireEvent.keyDown(screen.getByRole("button", { name: /r1 clip at/i }), { key: "Delete" });
     expect(onRemoveClip).toHaveBeenCalledWith("clip-1");
+  });
+
+  it("the clip M button toggles per-clip mute", () => {
+    const { arr } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.click(screen.getByRole("button", { name: /mute r1 clip/i }));
+    expect(onToggleClipMute).toHaveBeenCalledWith("clip-1");
   });
 
   it("the + Add track button calls onAddTrack", () => {

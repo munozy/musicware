@@ -263,4 +263,13 @@ describe("useArrangement — mute/solo + preview", () => {
     act(() => result.current.previewRecording(rec)); // toggle off
     expect(result.current.previewingId).toBeNull();
   });
+
+  it("toggleClipMute flips a placed clip's muted flag", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+    act(() => result.current.toggleClipMute(clipId));
+    expect(result.current.arrangement.tracks[0].clips[0].muted).toBe(true);
+  });
 });

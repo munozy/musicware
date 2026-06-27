@@ -168,6 +168,15 @@ describe("flattenArrangement — track gating & robustness", () => {
     expect(flattenArrangement(a, [cleanNote("r1")])).toHaveLength(0);
   });
 
+  it("a muted clip is skipped (per-brick mute), other clips still play", () => {
+    const a = arr([
+      track({ id: "t1", clips: [clip({ recordingId: "r1", muted: true }), clip({ recordingId: "r2" })] }),
+    ]);
+    const ev = flattenArrangement(a, [cleanNote("r1", 60), cleanNote("r2", 64)]);
+    const notes = new Set(ev.filter((e) => "note" in e).map((e) => (e as { note: number }).note));
+    expect(notes).toEqual(new Set([64])); // r1 muted → only r2 sounds
+  });
+
   it("solo wins: only soloed tracks play, others fall silent", () => {
     const a = arr([
       track({ id: "t1", clips: [clip({ recordingId: "r1", startMs: 0 })] }),
