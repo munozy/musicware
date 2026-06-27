@@ -353,7 +353,12 @@ describe("flattenArrangement — review regressions", () => {
     expect(onCount(2.9)).toBe(2);
   });
 
-  it("preserves stable order for >2 events at the same instant (presets first, then ons, in track order)", () => {
+  it("keeps each clip's preset immediately before its own note at a shared instant (per-clip timbre)", () => {
+    // Three clips starting at t=0 with DIFFERENT presets. The events must interleave
+    // per clip (preset → its own on), NOT group all presets then all ons — otherwise
+    // every note_on captures whichever preset fired last and they all sound the same
+    // (the overlap bug). With ADR-0008 the engine renders each voice by its captured
+    // preset, so this ordering is what makes overlapping clips keep their own instrument.
     const recs = [
       rec("a", 1000, [{ t: 0, kind: "preset", index: 1 }, { t: 0, kind: "on", note: 60 }, { t: 1000, kind: "off", note: 60 }]),
       rec("b", 1000, [{ t: 0, kind: "preset", index: 2 }, { t: 0, kind: "on", note: 62 }, { t: 1000, kind: "off", note: 62 }]),
@@ -368,8 +373,16 @@ describe("flattenArrangement — review regressions", () => {
       recs,
     );
     const atZero = ev.filter((e) => e.t === 0);
-    expect(atZero.map((e) => e.kind)).toEqual(["preset", "preset", "preset", "on", "on", "on"]);
-    expect(atZero.filter((e) => e.kind === "preset").map((e) => (e as { index: number }).index)).toEqual([1, 2, 3]);
+    expect(atZero.map((e) => e.kind)).toEqual(["preset", "on", "preset", "on", "preset", "on"]);
+    // Each note's immediately-preceding event is ITS clip's preset.
+    expect([
+      (atZero[0] as { index: number }).index,
+      (atZero[1] as { note: number }).note,
+      (atZero[2] as { index: number }).index,
+      (atZero[3] as { note: number }).note,
+      (atZero[4] as { index: number }).index,
+      (atZero[5] as { note: number }).note,
+    ]).toEqual([1, 60, 2, 62, 3, 64]);
   });
 });
 

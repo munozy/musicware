@@ -67,10 +67,6 @@ const MIN_NOTE = 0;
 const MAX_NOTE = 127;
 const clampNote = (n: number): number => Math.max(MIN_NOTE, Math.min(MAX_NOTE, Math.round(n)));
 
-// Equal-t ordering: a preset takes effect, then releases happen, then presses — so a
-// retrigger at the same instant reads as off-then-on rather than a doubled voice.
-const KIND_ORDER: Record<SynthEvent["kind"], number> = { preset: 0, off: 1, on: 2 };
-
 function toMap(recordings: Recording[] | Map<string, Recording>): Map<string, Recording> {
   if (recordings instanceof Map) return recordings;
   const m = new Map<string, Recording>();
@@ -182,7 +178,13 @@ export function flattenArrangement(
     }
   }
 
-  events.sort((a, b) => a.t - b.t || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+  // STABLE sort by time only. Crucially this keeps each clip's events grouped at a shared
+  // instant (flattenClip already emits preset-before-its-notes, and clips are pushed in
+  // order), so every note_on stays immediately after ITS OWN clip's set_preset. The engine
+  // captures the preset at note-on (ADR-0008), so this is what makes two clips that start at
+  // the SAME time each keep their own instrument — a global kind-sort grouped all presets
+  // first, making both notes capture whichever preset fired last (the overlap bug).
+  events.sort((a, b) => a.t - b.t);
   return events;
 }
 
