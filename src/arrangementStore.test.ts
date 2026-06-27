@@ -13,6 +13,7 @@ import {
   removeClip,
   toggleTrackMuted,
   toggleTrackSoloed,
+  toggleClipMuted,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -260,5 +261,17 @@ describe("track mute / solo toggles", () => {
     const id = arr.tracks[1].id;
     expect(toggleTrackSoloed(arr, id).tracks[1].soloed).toBe(true);
     expect(toggleTrackSoloed(arr, "nope")).toBe(arr);
+  });
+
+  it("toggleClipMuted flips a single clip's muted flag (immutable); unknown id unchanged", () => {
+    const base = newArrangement();
+    const tid = base.tracks[0].id;
+    const arr = addClip(base, tid, "rec-1", 0);
+    const clipId = arr.tracks[0].clips[0].id;
+    const muted = toggleClipMuted(arr, clipId);
+    expect(muted.tracks[0].clips[0].muted).toBe(true);
+    expect(arr.tracks[0].clips[0].muted).toBeFalsy(); // original unchanged
+    expect(toggleClipMuted(muted, clipId).tracks[0].clips[0].muted).toBe(false); // toggles back
+    expect(toggleClipMuted(arr, "nope")).toBe(arr);
   });
 });

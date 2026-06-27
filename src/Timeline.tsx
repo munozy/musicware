@@ -42,6 +42,7 @@ type Props = {
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   onMoveClip: (clipId: string, startMs: number) => void;
   onRemoveClip: (clipId: string) => void;
+  onToggleClipMute: (clipId: string) => void;
   trackOps: TrackOps;
 };
 
@@ -50,11 +51,13 @@ function ClipBlock({
   recordings,
   onMoveClip,
   onRemoveClip,
+  onToggleClipMute,
 }: {
   clip: ClipInstance;
   recordings: Recording[];
   onMoveClip: (clipId: string, startMs: number) => void;
   onRemoveClip: (clipId: string) => void;
+  onToggleClipMute: (clipId: string) => void;
 }) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
@@ -77,12 +80,15 @@ function ClipBlock({
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       onRemoveClip(clip.id);
+    } else if (e.key === "m" || e.key === "M") {
+      e.preventDefault();
+      onToggleClipMute(clip.id);
     }
   };
 
   return (
     <div
-      className="timeline-clip"
+      className={`timeline-clip${clip.muted ? " muted" : ""}`}
       style={{ left: leftPx, width: widthPx }}
       title={name}
       draggable
@@ -90,9 +96,23 @@ function ClipBlock({
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds. Drag or arrow keys to move; Delete to remove.`}
+      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds${clip.muted ? ", muted" : ""}. Drag or arrow keys to move; M to mute; Delete to remove.`}
     >
       <span className="timeline-clip-label">{name}</span>
+      <button
+        className={`timeline-clip-mute${clip.muted ? " active" : ""}`}
+        aria-label={`${clip.muted ? "Unmute" : "Mute"} ${name} clip`}
+        aria-pressed={clip.muted ?? false}
+        title={clip.muted ? "Unmute" : "Mute"}
+        draggable={false}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleClipMute(clip.id);
+        }}
+      >
+        M
+      </button>
       <button
         className="timeline-clip-delete"
         aria-label={`Remove ${name} clip`}
@@ -117,6 +137,7 @@ function TrackLane({
   onPlaceClip,
   onMoveClip,
   onRemoveClip,
+  onToggleClipMute,
 }: {
   trackId: string;
   clips: ClipInstance[];
@@ -124,6 +145,7 @@ function TrackLane({
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   onMoveClip: (clipId: string, startMs: number) => void;
   onRemoveClip: (clipId: string) => void;
+  onToggleClipMute: (clipId: string) => void;
 }) {
   const laneRef = useRef<HTMLDivElement>(null);
 
@@ -172,6 +194,7 @@ function TrackLane({
           recordings={recordings}
           onMoveClip={onMoveClip}
           onRemoveClip={onRemoveClip}
+          onToggleClipMute={onToggleClipMute}
         />
       ))}
     </div>
@@ -200,6 +223,7 @@ export default function Timeline({
   onPlaceClip,
   onMoveClip,
   onRemoveClip,
+  onToggleClipMute,
   trackOps,
 }: Props) {
   return (
@@ -226,6 +250,7 @@ export default function Timeline({
               onPlaceClip={onPlaceClip}
               onMoveClip={onMoveClip}
               onRemoveClip={onRemoveClip}
+              onToggleClipMute={onToggleClipMute}
             />
           </div>
         ))}

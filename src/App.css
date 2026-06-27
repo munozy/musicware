@@ -1176,3 +1176,39 @@ kbd {
   border-color: #f5a623;
   color: #1a1a1a;
 }
+
+/* --- per-clip mute (M) + muted styling --- */
+.timeline-clip-mute {
+  position: absolute;
+  top: 2px;
+  right: 22px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.timeline-clip:hover .timeline-clip-mute,
+.timeline-clip:focus-within .timeline-clip-mute,
+.timeline-clip-mute:focus,
+.timeline-clip-mute.active {
+  opacity: 1;
+}
+.timeline-clip-mute.active {
+  background: var(--rec);
+}
+.timeline-clip.muted {
+  opacity: 0.45;
+}
+.timeline-clip.muted .timeline-clip-label {
+  text-decoration: line-through;
+}
