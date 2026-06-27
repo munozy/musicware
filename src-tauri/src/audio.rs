@@ -806,7 +806,6 @@ fn render_block(
     voices: &mut [Voice],
     channels: usize,
     amp: f32,
-    waveform: Waveform,
     adsr_table: &[Adsr; PRESET_COUNT],
 ) {
     // cpal always delivers whole interleaved frames, so `out.len()` is a multiple
@@ -817,13 +816,14 @@ fn render_block(
         for v in voices.iter_mut() {
             if v.is_sounding() {
                 let env = step_env(v, &adsr_table[v.preset as usize]);
-                // Drums are dispatched per-VOICE (by the preset it was struck with),
-                // not by the live block waveform — a one-shot drum must keep decaying
-                // and self-free even if the user switches to another preset mid-tail
-                // (otherwise its branch is skipped and, with sustain 1 + note-off
-                // ignored, the voice strands and leaks a DC term). Bell + tonal
-                // waveforms stay GLOBAL (held notes re-timbre live, STORY-K4).
-                let voice_is_drum = PRESETS[v.preset as usize].waveform == Waveform::Drums;
+                // Per-VOICE waveform: each voice renders with the preset it was struck/
+                // scheduled with (captured in v.preset at note-on), so overlapping clips
+                // with different instruments each keep their own timbre (ADR-0008, fixes
+                // the arrangement overlap). Held notes therefore keep their struck patch
+                // (this supersedes STORY-K4's global live-re-timbre). A plain array index —
+                // no alloc, no lock, RT-safe.
+                let voice_wf = PRESETS[v.preset as usize].waveform;
+                let voice_is_drum = voice_wf == Waveform::Drums;
                 let s = if voice_is_drum {
                     // Drum source (∈[-1,1]) shaped by the baked amplitude env; the env
                     // decays and, at its floor, frees the voice (drums ignore note-off).
@@ -844,7 +844,7 @@ fn render_block(
                         v.stage = EnvStage::Idle;
                     }
                     out
-                } else if waveform == Waveform::Bell {
+                } else if voice_wf == Waveform::Bell {
                     // Bell sums INHARMONIC partials, each on its own phase accumulator
                     // so a non-integer ratio causes no 2π-wrap discontinuity; bounded
                     // to [-1,1] by /BELL_NORM.
@@ -862,7 +862,7 @@ fn render_block(
                     }
                     acc / BELL_NORM
                 } else {
-                    eval_waveform(waveform, v.phase)
+                    eval_waveform(voice_wf, v.phase)
                 };
                 sample += amp * env * s;
                 // Theremin vibrato: nudge the phase by a slow LFO so the instantaneous
@@ -870,7 +870,7 @@ fn render_block(
                 // phase_delta below → net advance = phase_delta·(1 + depth·sin(lfo))).
                 // For non-theremin voices lfo_inc=0 freezes the LFO and lfo_phase was
                 // reset to 0 at note-on, so sin(lfo_phase)=0 → the nudge is exactly zero.
-                if waveform == Waveform::Theremin {
+                if voice_wf == Waveform::Theremin {
                     v.lfo_phase += v.lfo_inc;
                     while v.lfo_phase >= TWO_PI {
                         v.lfo_phase -= TWO_PI;
@@ -1147,22 +1147,15 @@ fn audio_thread(
             // Wrap in assert_no_alloc so any accidental allocation aborts in
             // debug/test builds.  Compiles to a no-op in release.
             assert_no_alloc(|| {
-                // Read the live preset once per block (clamped) — waveform applies
-                // to all voices; the envelope is captured per-voice at note-on.
+                // Read the live preset once per block (clamped) — it stamps each NEW
+                // note's voice at note-on; rendering is per-voice (ADR-0008), so a note's
+                // timbre is fixed by the preset active when it started, not the live block.
                 let i = (preset.load(Ordering::Relaxed) as usize).min(PRESET_COUNT - 1);
-                let waveform = PRESETS[i].waveform;
                 // Drain all pending note events (pure index math, no alloc/lock).
                 while let Some(ev) = consumer.try_pop() {
                     apply_event(&mut pool, ev, sr, i as u8);
                 }
-                render_block(
-                    data,
-                    &mut pool.voices,
-                    channels,
-                    AMPLITUDE,
-                    waveform,
-                    &adsr_table,
-                );
+                render_block(data, &mut pool.voices, channels, AMPLITUDE, &adsr_table);
                 // Apply the live master volume (read once per block) and limit —
                 // the only stage that scales by user gain; the clamp guarantees a
                 // valid output sample no matter how hard the level is driven.
@@ -1230,7 +1223,7 @@ mod tests {
     }
     fn render_sine(out: &mut [f32], voices: &mut [Voice], channels: usize, amp: f32, adsr: &Adsr) {
         let table = [*adsr; PRESET_COUNT];
-        render_block(out, voices, channels, amp, Waveform::Sine, &table);
+        render_block(out, voices, channels, amp, &table);
     }
 
     const ALL_WAVEFORMS: [Waveform; 8] = [
@@ -1404,25 +1397,18 @@ mod tests {
         let sounding_voices = AtomicUsize::new(0);
         let volume = AtomicU32::new(DEFAULT_VOLUME.to_bits());
 
-        // Mirror the real callback for EVERY waveform: drain + render + volume-limit
-        // + publish, all under the no-alloc guard (additive's harmonic loop AND the
-        // master-volume post-process included).
+        // Mirror the real callback: drain + render + volume-limit + publish, all under
+        // the no-alloc guard (the additive harmonic loop AND the master-volume post-process
+        // included). Voices captured preset 1 (Organ = additive) so the additive render
+        // path runs; per-preset render boundedness is covered by the bell/drums/theremin/
+        // organ tests below (each renders its own preset under the per-voice model, ADR-0008).
         assert_no_alloc(|| {
             while let Some(ev) = consumer.try_pop() {
                 apply_event(&mut pool, ev, sr, 1); // capture preset 1 (Organ)
             }
-            for wf in ALL_WAVEFORMS {
-                render_block(
-                    &mut buf,
-                    &mut pool.voices,
-                    CHANNELS,
-                    AMPLITUDE,
-                    wf,
-                    &adsr_table,
-                );
-                let level = f32::from_bits(volume.load(Ordering::Relaxed));
-                apply_master_volume(&mut buf, level * VOLUME_GAIN_MAX);
-            }
+            render_block(&mut buf, &mut pool.voices, CHANNELS, AMPLITUDE, &adsr_table);
+            let level = f32::from_bits(volume.load(Ordering::Relaxed));
+            apply_master_volume(&mut buf, level * VOLUME_GAIN_MAX);
             sounding_voices.store(pool.sounding_count(), Ordering::Relaxed);
         });
 
@@ -1650,14 +1636,7 @@ mod tests {
             v.phase_delta = 0.0; // hold phase so every sample is the worst case
         }
         let mut buf = [0.0f32; 64];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            CH,
-            AMPLITUDE,
-            Waveform::Square,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, CH, AMPLITUDE, &table);
 
         for &s in buf.iter() {
             assert!(
@@ -1871,14 +1850,7 @@ mod tests {
             v.env = 1.0;
         }
         let mut buf = [0.0f32; 1024];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Bell,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         for &s in buf.iter() {
             assert!((-1.0..=1.0).contains(&s), "bell mix clipped: {s}");
         }
@@ -1894,14 +1866,7 @@ mod tests {
         let mut pool = VoicePool::new();
         apply_event(&mut pool, NoteEvent::NoteOn { note: 72 }, sr, 3); // a high bell → many wraps
         let mut buf = [0.0f32; 4096];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Bell,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         let v = pool.voices.iter().find(|x| x.note == 72).unwrap();
         for (p, &ph) in v.bell_phases.iter().enumerate() {
             assert!(
@@ -1939,14 +1904,7 @@ mod tests {
         // Render ~1 s.
         let mut buf = [0.0f32; 4096];
         for _ in 0..((sr as usize) / 4096 + 1) {
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Bell,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         }
         let v = pool.voices.iter().find(|x| x.note == 60).unwrap();
         // Hum gain barely moves (relative decay ≈ 1); the top partial (shortest T60)
@@ -2029,20 +1987,21 @@ mod tests {
     fn organ_and_piano_render_spectrally_distinct() {
         let sr = 44_100.0;
         let table = build_adsr_table(sr);
-        let render = |wf: Waveform| {
+        // Per ADR-0008 each voice renders by its CAPTURED preset, so we strike the voice
+        // with the preset under test (envelope pinned via stage/env so the shape diff is
+        // dominated by the waveform/registration over this short window).
+        let render = |preset: u8| {
             let mut pool = VoicePool::new();
-            // Same captured envelope (preset 0) for both, so any shape difference is
-            // purely the waveform/registration, not the amplitude envelope.
-            apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0);
+            apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, preset);
             let v = pool.voices.iter_mut().find(|v| v.note == 69).unwrap();
             v.stage = EnvStage::Decay;
             v.env = 1.0;
             let mut buf = [0.0f32; 1024];
-            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, wf, &table);
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
             buf
         };
-        let organ = render(Waveform::Organ);
-        let piano = render(Waveform::EPiano);
+        let organ = render(1); // Organ
+        let piano = render(2); // Piano
 
         let peak = |b: &[f32; 1024]| b.iter().fold(1e-9f32, |m, &x| m.max(x.abs()));
         let (po, pp) = (peak(&organ), peak(&piano));
@@ -2075,14 +2034,7 @@ mod tests {
         }
         let mut buf = [0.0f32; 2048];
         for _ in 0..8 {
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Drums,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
             for &s in buf.iter() {
                 assert!((-1.0..=1.0).contains(&s), "drum mix out of range: {s}");
             }
@@ -2099,14 +2051,7 @@ mod tests {
         apply_event(&mut pool, NoteEvent::NoteOn { note: 61 }, sr, DRUMS); // C# rim (shortest τ)
         assert_eq!(pool.sounding_count(), 1);
         let mut buf = [0.0f32; 4096]; // ~93 ms — past the rim's ~55 ms decay-to-floor
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Drums,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         assert_eq!(
             pool.sounding_count(),
             0,
@@ -2143,14 +2088,7 @@ mod tests {
             let mut pool = VoicePool::new();
             apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
             let mut buf = [0.0f32; 1024];
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Drums,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
             buf
         };
         let kick = render(60); // C  → pitch-swept sine
@@ -2179,21 +2117,14 @@ mod tests {
         }
         let mut buf = [0.0f32; 512];
         assert_no_alloc(|| {
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Drums,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         });
     }
 
     /// Regression for the zombie-voice defect: a struck drum must keep decaying and
-    /// self-free even when the live block waveform is no longer Drums (user switched
-    /// preset mid-tail). Drums dispatch per-voice (by captured preset), so the voice
-    /// must still reach Idle and not strand a slot / leak a DC term.
+    /// self-free during render. Drums dispatch per-voice by their captured preset
+    /// (ADR-0008), so the voice reaches Idle and never strands a slot / leaks a DC term —
+    /// regardless of any later preset change (a switch only affects NEW notes' voices).
     #[test]
     fn drum_voice_frees_after_preset_switch() {
         let sr = 44_100.0;
@@ -2201,16 +2132,9 @@ mod tests {
         let mut pool = VoicePool::new();
         apply_event(&mut pool, NoteEvent::NoteOn { note: 61 }, sr, DRUMS); // rim (short τ)
         assert_eq!(pool.sounding_count(), 1);
-        // Render with a NON-Drums live waveform (as if the user switched to Saw).
+        // Render the drum voice to completion — its own captured Drums preset drives it.
         let mut buf = [0.0f32; 4096];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Saw,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         assert_eq!(
             pool.sounding_count(),
             0,
@@ -2229,14 +2153,7 @@ mod tests {
             let mut pool = VoicePool::new();
             apply_event(&mut pool, NoteEvent::NoteOn { note }, sr, DRUMS);
             let mut buf = [0.0f32; 1024];
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Drums,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
             buf.windows(2)
                 .filter(|w| w[0].signum() != w[1].signum())
                 .count()
@@ -2290,14 +2207,7 @@ mod tests {
 
         // Render ~a quarter vibrato period so the LFO's contribution is non-zero.
         let mut buf = [0.0f32; 2000];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Theremin,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
 
         let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
         assert!(v.lfo_phase > 0.0, "the vibrato LFO should have advanced");
@@ -2323,14 +2233,7 @@ mod tests {
         // Play a theremin note and render so its LFO phase advances to non-zero.
         apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, THEREMIN);
         let mut buf = [0.0f32; 1000];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Theremin,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         assert!(pool.voices.iter().find(|v| v.note == 69).unwrap().lfo_phase > 0.0);
 
         // Reuse the SAME slot (same-note alloc) for a non-theremin (Sine) note.
@@ -2343,26 +2246,21 @@ mod tests {
         );
     }
 
-    /// Behaviour-level proof (not just the lfo_phase state): a reused Sine voice,
-    /// rendered while the LIVE waveform is Theremin (the exact bug condition), must
-    /// advance its phase by exactly phase_delta·N — i.e. ZERO vibrato detune.
+    /// Behaviour-level proof: a slot reused from a Theremin voice as a SINE note must
+    /// advance its phase by exactly phase_delta·N — ZERO vibrato detune. Under per-voice
+    /// rendering (ADR-0008) the vibrato LFO runs only for voices whose captured preset is
+    /// Theremin, so a Sine voice cannot inherit vibrato — a structurally stronger guarantee
+    /// than ADR-0006's lfo_phase reset (which this still exercises via the reuse).
     #[test]
-    fn reused_voice_has_no_vibrato_detune_under_theremin_global() {
+    fn reused_sine_voice_has_no_vibrato_detune() {
         let sr = 44_100.0;
         let table = build_adsr_table(sr);
         let mut pool = VoicePool::new();
         apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, THEREMIN);
         let mut warm = [0.0f32; 1000];
-        render_block(
-            &mut warm,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Theremin,
-            &table,
-        );
-        // Reuse the slot for a Sine note (resets lfo_phase), then render UNDER the
-        // Theremin global so the vibrato block runs — a stale phase would detune it.
+        render_block(&mut warm, &mut pool.voices, 1, AMPLITUDE, &table);
+        // Reuse the slot for a Sine note: lfo_phase resets AND its captured preset is now
+        // Sine, so the vibrato block is skipped for it entirely — no detune either way.
         apply_event(&mut pool, NoteEvent::NoteOn { note: 69 }, sr, 0);
         let (pd, p0) = {
             let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
@@ -2370,14 +2268,7 @@ mod tests {
         };
         const N: usize = 1000;
         let mut buf = [0.0f32; N];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Theremin,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         let v = pool.voices.iter().find(|x| x.note == 69).unwrap();
         let expected = (p0 + pd * N as f32).rem_euclid(TWO_PI);
         let raw = (v.phase - expected).abs();
@@ -2555,14 +2446,7 @@ mod tests {
         v.phase = std::f32::consts::FRAC_PI_2; // sin = 1 → the voice's peak sample
 
         let mut buf = [0.0f32; 1];
-        render_block(
-            &mut buf,
-            &mut pool.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Sine,
-            &table,
-        );
+        render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         // Pre-volume, the single voice peaks at AMPLITUDE * MASTER_GAIN.
         assert!((buf[0] - AMPLITUDE * MASTER_GAIN).abs() < 1e-4);
         apply_master_volume(&mut buf, 1.0 * VOLUME_GAIN_MAX);
@@ -2573,34 +2457,30 @@ mod tests {
         );
     }
 
-    /// Switching the waveform changes the rendered output (the audible-timbre AC),
-    /// while phase stays continuous.
+    /// ADR-0008: `render_block` selects each voice's waveform from its CAPTURED preset,
+    /// so two voices struck with different presets render distinct timbres — the basis
+    /// for overlapping arrangement clips each keeping their own instrument.
     #[test]
-    fn switching_waveform_changes_rendered_output() {
+    fn per_voice_waveform_renders_distinct_timbres() {
         let sr = 44_100.0;
         let table = build_adsr_table(sr);
-        let mk = || {
+        let render = |preset: u8| {
             let mut p = VoicePool::new();
-            apply_event(&mut p, NoteEvent::NoteOn { note: 69 }, sr, 0);
-            p
+            apply_event(&mut p, NoteEvent::NoteOn { note: 69 }, sr, preset);
+            let v = p.voices.iter_mut().find(|v| v.note == 69).unwrap();
+            v.stage = EnvStage::Decay;
+            v.env = 1.0;
+            let mut buf = [0.0f32; 256];
+            render_block(&mut buf, &mut p.voices, 1, AMPLITUDE, &table);
+            buf
         };
-        let (mut a, mut b) = (mk(), mk());
-        let mut sine = [0.0f32; 256];
-        let mut saw = [0.0f32; 256];
-        render_block(
-            &mut sine,
-            &mut a.voices,
-            1,
-            AMPLITUDE,
-            Waveform::Sine,
-            &table,
-        );
-        render_block(&mut saw, &mut b.voices, 1, AMPLITUDE, Waveform::Saw, &table);
+        let sine = render(0); // Sine
+        let organ = render(1); // Organ
         assert!(
             sine.iter()
-                .zip(saw.iter())
+                .zip(organ.iter())
                 .any(|(x, y)| (x - y).abs() > 1e-4),
-            "sine and saw should produce different output"
+            "voices with different captured presets must render distinct timbres"
         );
     }
 
@@ -2637,14 +2517,7 @@ mod tests {
         // Render ~1.5 s so both pass attack+decay into sustain (Piano decay = 600 ms).
         let mut buf = [0.0f32; 4096];
         for _ in 0..16 {
-            render_block(
-                &mut buf,
-                &mut pool.voices,
-                1,
-                AMPLITUDE,
-                Waveform::Sine,
-                &table,
-            );
+            render_block(&mut buf, &mut pool.voices, 1, AMPLITUDE, &table);
         }
 
         let piano_env = pool.voices.iter().find(|v| v.note == 60).unwrap().env;
