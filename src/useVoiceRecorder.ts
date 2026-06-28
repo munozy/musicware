@@ -44,8 +44,24 @@ export function useVoiceRecorder({
   const startRecording = useCallback(async () => {
     if (isRecording) return;
     setError(null);
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setError("This build can't reach the microphone.");
+    // Diagnose exactly what the webview is missing — the fix differs per cause.
+    const diag = {
+      secureContext: typeof window !== "undefined" ? window.isSecureContext : false,
+      mediaDevices: !!navigator.mediaDevices,
+      getUserMedia: !!navigator.mediaDevices?.getUserMedia,
+      mediaRecorder: typeof MediaRecorder !== "undefined",
+    };
+    if (!diag.mediaDevices || !diag.getUserMedia || !diag.mediaRecorder) {
+      const missing = [
+        !diag.secureContext && "not a secure context",
+        !diag.mediaDevices && "no navigator.mediaDevices",
+        diag.mediaDevices && !diag.getUserMedia && "no getUserMedia",
+        !diag.mediaRecorder && "no MediaRecorder",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      console.error("voice: microphone API unavailable —", diag);
+      setError(`Microphone API unavailable in this webview (${missing}).`);
       return;
     }
     try {

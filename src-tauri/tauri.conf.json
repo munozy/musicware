@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: filesystem: media: mediastream: ws: wss: http://localhost:* https://localhost:* ipc: http://ipc.localhost tauri: asset: https://asset.localhost"
     }
   },
   "bundle": {
