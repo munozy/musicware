@@ -96,6 +96,29 @@ export function addClip(
   return { ...arr, tracks: updatedTracks };
 }
 
+/** Two octaves either way — beyond that a transposed brick rarely stays musical, and the
+ * engine clamps notes to [0,127] anyway (arrangement.ts clampNote). */
+export const MAX_TRANSPOSE = 24;
+
+/**
+ * Replace the clip with `clipId` (wherever it lives) by `fn(clip)`, immutably. Returns the
+ * SAME arrangement reference if no clip matches — so callers can rely on identity for
+ * "nothing changed". The shared spine of every per-clip mutator below.
+ */
+function mapMatchingClip(
+  arr: Arrangement,
+  clipId: string,
+  fn: (clip: ClipInstance) => ClipInstance,
+): Arrangement {
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => c.id === clipId)) return t;
+    found = true;
+    return { ...t, clips: t.clips.map((c) => (c.id === clipId ? fn(c) : c)) };
+  });
+  return found ? { ...arr, tracks } : arr;
+}
+
 /**
  * Return a new arrangement with the given clip moved to `startMs` (clamped >= 0).
  * Pure/immutable; finds the clip across all tracks. Time-only — the clip stays on
@@ -103,16 +126,40 @@ export function addClip(
  */
 export function moveClip(arr: Arrangement, clipId: string, startMs: number): Arrangement {
   const at = Math.max(0, Math.round(startMs));
+  return mapMatchingClip(arr, clipId, (c) => ({ ...c, startMs: at }));
+}
+
+/**
+ * Duplicate a placed clip (US-13, the core "LEGO" recombination edit): a copy with a fresh
+ * id and all edits preserved (transpose/loop/trim/mute), inserted right after the original
+ * on the SAME track at `atMs` (clamped >= 0; the caller passes startMs + the clip's played
+ * length so the copy abuts). Pure/immutable; unknown clipId → unchanged.
+ */
+export function duplicateClip(arr: Arrangement, clipId: string, atMs: number): Arrangement {
+  const at = Math.max(0, Math.round(atMs));
   let found = false;
   const tracks = arr.tracks.map((t) => {
-    if (!t.clips.some((c) => c.id === clipId)) return t;
+    const idx = t.clips.findIndex((c) => c.id === clipId);
+    if (idx === -1) return t;
     found = true;
-    return {
-      ...t,
-      clips: t.clips.map((c) => (c.id === clipId ? { ...c, startMs: at } : c)),
-    };
+    const copy: ClipInstance = { ...t.clips[idx], id: newId(), startMs: at };
+    const clips = [...t.clips];
+    clips.splice(idx + 1, 0, copy);
+    return { ...t, clips };
   });
   return found ? { ...arr, tracks } : arr;
+}
+
+/** Set a clip's loop count (US-15). Clamped to a whole number >= 1. Unknown clipId → unchanged. */
+export function setClipLoopCount(arr: Arrangement, clipId: string, count: number): Arrangement {
+  const n = Math.max(1, Math.floor(Number.isFinite(count) ? count : 1));
+  return mapMatchingClip(arr, clipId, (c) => ({ ...c, loopCount: n }));
+}
+
+/** Set a clip's transpose in semitones (US-16). Clamped to ±MAX_TRANSPOSE. Unknown clipId → unchanged. */
+export function setClipTranspose(arr: Arrangement, clipId: string, semitones: number): Arrangement {
+  const t = Math.max(-MAX_TRANSPOSE, Math.min(MAX_TRANSPOSE, Math.trunc(Number.isFinite(semitones) ? semitones : 0)));
+  return mapMatchingClip(arr, clipId, (c) => ({ ...c, transpose: t }));
 }
 
 // ---- Track management (Slice 3, US-3/4/5/6/10) — all pure/immutable, unknown-id safe ----
@@ -179,11 +226,5 @@ export function toggleTrackSoloed(arr: Arrangement, trackId: string): Arrangemen
 
 /** Toggle a single clip's mute (per-brick). flattenArrangement skips muted clips. Unknown id → unchanged. */
 export function toggleClipMuted(arr: Arrangement, clipId: string): Arrangement {
-  let found = false;
-  const tracks = arr.tracks.map((t) => {
-    if (!t.clips.some((c) => c.id === clipId)) return t;
-    found = true;
-    return { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, muted: !c.muted } : c)) };
-  });
-  return found ? { ...arr, tracks } : arr;
+  return mapMatchingClip(arr, clipId, (c) => ({ ...c, muted: !c.muted }));
 }

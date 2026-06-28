@@ -14,7 +14,7 @@
  */
 
 import { useRef } from "react";
-import type { Arrangement, ClipInstance } from "./arrangement";
+import { clipPlayedMs, type Arrangement, type ClipInstance } from "./arrangement";
 import type { Recording } from "./recordings";
 import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
@@ -23,6 +23,10 @@ import Playhead from "./Playhead";
 const SNAP_MS = 100;
 const RULER_TICK_MS = 1000;
 const RULER_WIDTH_MS = 30_000; // show 30 seconds of ruler
+const MIN_CLIP_PX = 4;
+
+/** "+2" / "-3" / "0" — the semitone offset for a transpose badge. */
+const fmtTranspose = (t: number): string => (t > 0 ? `+${t}` : `${t}`);
 
 export type TrackOps = {
   onAddTrack: () => void;
@@ -40,10 +44,17 @@ type Props = {
   isPlaying: boolean;
   playStartedAt: number | null;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
+  clipOps: ClipOps;
+  trackOps: TrackOps;
+};
+
+type ClipOps = {
   onMoveClip: (clipId: string, startMs: number) => void;
   onRemoveClip: (clipId: string) => void;
   onToggleClipMute: (clipId: string) => void;
-  trackOps: TrackOps;
+  onDuplicateClip: (clipId: string, atMs: number) => void;
+  onSetClipLoop: (clipId: string, count: number) => void;
+  onTransposeClip: (clipId: string, semitones: number) => void;
 };
 
 function ClipBlock({
@@ -52,17 +63,23 @@ function ClipBlock({
   onMoveClip,
   onRemoveClip,
   onToggleClipMute,
-}: {
-  clip: ClipInstance;
-  recordings: Recording[];
-  onMoveClip: (clipId: string, startMs: number) => void;
-  onRemoveClip: (clipId: string) => void;
-  onToggleClipMute: (clipId: string) => void;
-}) {
+  onDuplicateClip,
+  onSetClipLoop,
+  onTransposeClip,
+}: { clip: ClipInstance; recordings: Recording[] } & ClipOps) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
-  const widthPx = rec ? Math.max(4, msToPx(rec.durationMs, PX_PER_MS)) : 4;
+  const loops = Math.max(1, Math.floor(clip.loopCount || 1));
+  const transpose = Math.trunc(clip.transpose || 0);
+  // Width reflects the TRIMMED window × loops, so the block on screen is exactly as long as
+  // it sounds (clipPlayedMs is the same maths the scheduler loops over). Falls back to a stub
+  // width for a dangling clip whose recording is gone.
+  const playedMs = rec ? clipPlayedMs(clip, rec.durationMs) : 0;
+  const widthPx = rec ? Math.max(MIN_CLIP_PX, msToPx(playedMs, PX_PER_MS)) : MIN_CLIP_PX;
   const leftPx = msToPx(clip.startMs, PX_PER_MS);
+  // Duplicate lands right after this clip so the copy abuts (the caller owns the geometry —
+  // the store stays recording-agnostic per ADR-0007).
+  const dupAtMs = clip.startMs + (rec ? playedMs : SNAP_MS);
 
   const handleDragStart = (e: React.DragEvent) => {
     const grabOffsetPx = e.clientX - e.currentTarget.getBoundingClientRect().left;
@@ -77,6 +94,21 @@ function ClipBlock({
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       onMoveClip(clip.id, clip.startMs + SNAP_MS);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      onTransposeClip(clip.id, transpose + 1); // store clamps to ±MAX_TRANSPOSE
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      onTransposeClip(clip.id, transpose - 1);
+    } else if (e.key === "]") {
+      e.preventDefault();
+      onSetClipLoop(clip.id, loops + 1);
+    } else if (e.key === "[") {
+      e.preventDefault();
+      onSetClipLoop(clip.id, loops - 1); // store clamps >= 1
+    } else if (e.key === "d" || e.key === "D") {
+      e.preventDefault();
+      onDuplicateClip(clip.id, dupAtMs);
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       onRemoveClip(clip.id);
@@ -86,26 +118,51 @@ function ClipBlock({
     }
   };
 
+  // Shared by every in-clip button: don't let the press start a clip drag or bubble to the lane.
+  const btnGuard = {
+    draggable: false as const,
+    onMouseDown: (e: React.MouseEvent) => e.stopPropagation(),
+  };
+
   return (
     <div
       className={`timeline-clip${clip.muted ? " muted" : ""}`}
       style={{ left: leftPx, width: widthPx }}
-      title={name}
+      title={`${name} — drag to move · D duplicate · ↑↓ transpose · [ ] loop · M mute · Del remove`}
       draggable
       onDragStart={handleDragStart}
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds${clip.muted ? ", muted" : ""}. Drag or arrow keys to move; M to mute; Delete to remove.`}
+      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds${loops > 1 ? `, looped ${loops} times` : ""}${transpose !== 0 ? `, transposed ${fmtTranspose(transpose)} semitones` : ""}${clip.muted ? ", muted" : ""}. Drag or Left/Right to move; Up/Down to transpose; [ and ] to loop; D to duplicate; M to mute; Delete to remove.`}
     >
       <span className="timeline-clip-label">{name}</span>
+
+      {(loops > 1 || transpose !== 0) && (
+        <span className="timeline-clip-badges" aria-hidden="true">
+          {loops > 1 && <span className="clip-badge clip-badge-loop">×{loops}</span>}
+          {transpose !== 0 && <span className="clip-badge clip-badge-transpose">{fmtTranspose(transpose)}</span>}
+        </span>
+      )}
+
+      <button
+        className="timeline-clip-dup"
+        aria-label={`Duplicate ${name} clip`}
+        title="Duplicate"
+        {...btnGuard}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDuplicateClip(clip.id, dupAtMs);
+        }}
+      >
+        ⧉
+      </button>
       <button
         className={`timeline-clip-mute${clip.muted ? " active" : ""}`}
         aria-label={`${clip.muted ? "Unmute" : "Mute"} ${name} clip`}
         aria-pressed={clip.muted ?? false}
         title={clip.muted ? "Unmute" : "Mute"}
-        draggable={false}
-        onMouseDown={(e) => e.stopPropagation()}
+        {...btnGuard}
         onClick={(e) => {
           e.stopPropagation();
           onToggleClipMute(clip.id);
@@ -117,8 +174,7 @@ function ClipBlock({
         className="timeline-clip-delete"
         aria-label={`Remove ${name} clip`}
         title="Remove"
-        draggable={false}
-        onMouseDown={(e) => e.stopPropagation()}
+        {...btnGuard}
         onClick={(e) => {
           e.stopPropagation();
           onRemoveClip(clip.id);
@@ -126,6 +182,63 @@ function ClipBlock({
       >
         ×
       </button>
+
+      <div className="timeline-clip-edit">
+        <span className="clip-stepper" role="group" aria-label={`Loop ${name} clip`}>
+          <button
+            className="clip-stepper-btn"
+            aria-label="Loop fewer times"
+            title="Loop fewer"
+            {...btnGuard}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetClipLoop(clip.id, loops - 1);
+            }}
+          >
+            −
+          </button>
+          <span className="clip-stepper-val">×{loops}</span>
+          <button
+            className="clip-stepper-btn"
+            aria-label="Loop more times"
+            title="Loop more"
+            {...btnGuard}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetClipLoop(clip.id, loops + 1);
+            }}
+          >
+            +
+          </button>
+        </span>
+        <span className="clip-stepper" role="group" aria-label={`Transpose ${name} clip`}>
+          <button
+            className="clip-stepper-btn"
+            aria-label="Transpose down a semitone"
+            title="Transpose down"
+            {...btnGuard}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTransposeClip(clip.id, transpose - 1);
+            }}
+          >
+            −
+          </button>
+          <span className="clip-stepper-val">{fmtTranspose(transpose)}</span>
+          <button
+            className="clip-stepper-btn"
+            aria-label="Transpose up a semitone"
+            title="Transpose up"
+            {...btnGuard}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTransposeClip(clip.id, transpose + 1);
+            }}
+          >
+            +
+          </button>
+        </span>
+      </div>
     </div>
   );
 }
@@ -135,17 +248,13 @@ function TrackLane({
   clips,
   recordings,
   onPlaceClip,
-  onMoveClip,
-  onRemoveClip,
-  onToggleClipMute,
+  clipOps,
 }: {
   trackId: string;
   clips: ClipInstance[];
   recordings: Recording[];
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
-  onMoveClip: (clipId: string, startMs: number) => void;
-  onRemoveClip: (clipId: string) => void;
-  onToggleClipMute: (clipId: string) => void;
+  clipOps: ClipOps;
 }) {
   const laneRef = useRef<HTMLDivElement>(null);
 
@@ -175,7 +284,7 @@ function TrackLane({
       const clipId = sep >= 0 ? rest.slice(0, sep) : rest;
       const grabOffsetPx = sep >= 0 ? Number(rest.slice(sep + 1)) || 0 : 0;
       const leftPx = Math.min(Math.max(0, e.clientX - laneLeft - grabOffsetPx), laneWidth);
-      onMoveClip(clipId, snapMs(pxToMs(leftPx, PX_PER_MS), SNAP_MS));
+      clipOps.onMoveClip(clipId, snapMs(pxToMs(leftPx, PX_PER_MS), SNAP_MS));
     }
   };
 
@@ -188,14 +297,7 @@ function TrackLane({
       onDrop={handleDrop}
     >
       {clips.map((clip) => (
-        <ClipBlock
-          key={clip.id}
-          clip={clip}
-          recordings={recordings}
-          onMoveClip={onMoveClip}
-          onRemoveClip={onRemoveClip}
-          onToggleClipMute={onToggleClipMute}
-        />
+        <ClipBlock key={clip.id} clip={clip} recordings={recordings} {...clipOps} />
       ))}
     </div>
   );
@@ -221,9 +323,7 @@ export default function Timeline({
   isPlaying,
   playStartedAt,
   onPlaceClip,
-  onMoveClip,
-  onRemoveClip,
-  onToggleClipMute,
+  clipOps,
   trackOps,
 }: Props) {
   return (
@@ -248,9 +348,7 @@ export default function Timeline({
               clips={track.clips}
               recordings={recordings}
               onPlaceClip={onPlaceClip}
-              onMoveClip={onMoveClip}
-              onRemoveClip={onRemoveClip}
-              onToggleClipMute={onToggleClipMute}
+              clipOps={clipOps}
             />
           </div>
         ))}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import Timeline, { type TrackOps } from "./Timeline";
 import { newArrangement } from "./arrangementStore";
-import type { Arrangement } from "./arrangement";
+import type { Arrangement, ClipInstance } from "./arrangement";
 import type { Recording } from "./recordings";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -21,16 +21,13 @@ const LANE_RECT = {
   left: 0, top: 0, width: 800, height: 60, right: 800, bottom: 60, x: 0, y: 0, toJSON: () => ({}),
 } as DOMRect;
 
-const withClip = (startMs: number) => {
+const withClip = (startMs: number, extra: Partial<ClipInstance> = {}) => {
   const arr = newArrangement();
   const tid = arr.tracks[0].id;
+  const clip: ClipInstance = { id: "clip-1", recordingId: "r1", startMs, transpose: 0, loopCount: 1, ...extra };
   const arr2: Arrangement = {
     ...arr,
-    tracks: arr.tracks.map((t) =>
-      t.id === tid
-        ? { ...t, clips: [{ id: "clip-1", recordingId: "r1", startMs, transpose: 0, loopCount: 1 }] }
-        : t,
-    ),
+    tracks: arr.tracks.map((t) => (t.id === tid ? { ...t, clips: [clip] } : t)),
   };
   return { arr: arr2, tid };
 };
@@ -46,6 +43,12 @@ describe("Timeline", () => {
   let onRemoveClip: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onToggleClipMute: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onDuplicateClip: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onSetClipLoop: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onTransposeClip: any;
   let trackOps: TrackOps;
 
   beforeEach(() => {
@@ -54,6 +57,9 @@ describe("Timeline", () => {
     onAddTrack = vi.fn();
     onRemoveClip = vi.fn();
     onToggleClipMute = vi.fn();
+    onDuplicateClip = vi.fn();
+    onSetClipLoop = vi.fn();
+    onTransposeClip = vi.fn();
     trackOps = {
       onAddTrack,
       onRenameTrack: vi.fn(),
@@ -73,9 +79,7 @@ describe("Timeline", () => {
         isPlaying={false}
         playStartedAt={null}
         onPlaceClip={onPlaceClip}
-        onMoveClip={onMoveClip}
-        onRemoveClip={onRemoveClip}
-        onToggleClipMute={onToggleClipMute}
+        clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip }}
         trackOps={trackOps}
       />,
     );
@@ -192,5 +196,74 @@ describe("Timeline", () => {
     renderTL(arr);
     const lane = screen.getByTestId(`lane-${trackId}`);
     expect(() => fireEvent.dragOver(lane)).not.toThrow();
+  });
+
+  // ---- Slice 5: clip editing (duplicate / loop / transpose) ----
+
+  it("the ⧉ button duplicates the clip just after it (startMs + played length)", () => {
+    const { arr } = withClip(0); // rec durationMs 2000, loopCount 1 → played 2000ms
+    renderTL(arr, [makeRec("r1", 2000)]);
+    fireEvent.click(screen.getByRole("button", { name: /duplicate r1 clip/i }));
+    expect(onDuplicateClip).toHaveBeenCalledWith("clip-1", 2000);
+  });
+
+  it("D on a focused clip duplicates it; the copy abuts after the LOOPED length", () => {
+    const { arr } = withClip(500, { loopCount: 2 }); // played 2000×2 = 4000ms; abut at 500+4000
+    renderTL(arr, [makeRec("r1", 2000)]);
+    fireEvent.keyDown(screen.getByRole("button", { name: /r1 clip at/i }), { key: "d" });
+    expect(onDuplicateClip).toHaveBeenCalledWith("clip-1", 4500);
+  });
+
+  it("loop steppers and [ ] keys change the loop count", () => {
+    const { arr } = withClip(0, { loopCount: 2 });
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.click(screen.getByRole("button", { name: /loop more/i }));
+    expect(onSetClipLoop).toHaveBeenLastCalledWith("clip-1", 3);
+    fireEvent.click(screen.getByRole("button", { name: /loop fewer/i }));
+    expect(onSetClipLoop).toHaveBeenLastCalledWith("clip-1", 1);
+    const block = screen.getByRole("button", { name: /r1 clip at/i });
+    fireEvent.keyDown(block, { key: "]" });
+    expect(onSetClipLoop).toHaveBeenLastCalledWith("clip-1", 3);
+    fireEvent.keyDown(block, { key: "[" });
+    expect(onSetClipLoop).toHaveBeenLastCalledWith("clip-1", 1);
+  });
+
+  it("transpose steppers and Up/Down keys change the transpose", () => {
+    const { arr } = withClip(0, { transpose: 0 });
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.click(screen.getByRole("button", { name: /transpose up/i }));
+    expect(onTransposeClip).toHaveBeenLastCalledWith("clip-1", 1);
+    fireEvent.click(screen.getByRole("button", { name: /transpose down/i }));
+    expect(onTransposeClip).toHaveBeenLastCalledWith("clip-1", -1);
+    const block = screen.getByRole("button", { name: /r1 clip at/i });
+    fireEvent.keyDown(block, { key: "ArrowUp" });
+    expect(onTransposeClip).toHaveBeenLastCalledWith("clip-1", 1);
+    fireEvent.keyDown(block, { key: "ArrowDown" });
+    expect(onTransposeClip).toHaveBeenLastCalledWith("clip-1", -1);
+  });
+
+  it("clip width reflects the looped length (×2 is twice as wide as ×1)", () => {
+    const single = withClip(0, { loopCount: 1 });
+    const { container, unmount } = renderTL(single.arr, [makeRec("r1", 2000)]);
+    const w1 = (container.querySelector(".timeline-clip") as HTMLElement).style.width;
+    unmount();
+    const double = withClip(0, { loopCount: 2 });
+    const { container: c2 } = renderTL(double.arr, [makeRec("r1", 2000)]);
+    const w2 = (c2.querySelector(".timeline-clip") as HTMLElement).style.width;
+    expect(w1).toBe("80px"); // 2000ms × 0.04 px/ms
+    expect(w2).toBe("160px"); // 4000ms × 0.04 px/ms
+  });
+
+  it("shows ×N and transpose badges only when non-default", () => {
+    const plain = withClip(0);
+    const { container, unmount } = renderTL(plain.arr, [makeRec("r1")]);
+    expect(container.querySelector(".clip-badge-loop")).toBeNull();
+    expect(container.querySelector(".clip-badge-transpose")).toBeNull();
+    unmount();
+
+    const edited = withClip(0, { loopCount: 2, transpose: 3 });
+    const { container: c2 } = renderTL(edited.arr, [makeRec("r1")]);
+    expect(c2.querySelector(".clip-badge-loop")?.textContent).toBe("×2");
+    expect(c2.querySelector(".clip-badge-transpose")?.textContent).toBe("+3");
   });
 });

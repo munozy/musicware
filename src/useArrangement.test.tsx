@@ -273,3 +273,36 @@ describe("useArrangement — mute/solo + preview", () => {
     expect(result.current.arrangement.tracks[0].clips[0].muted).toBe(true);
   });
 });
+
+describe("useArrangement — clip editing (Slice 5)", () => {
+  it("duplicateClip appends a copy after the original and persists it", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+
+    act(() => result.current.duplicateClip(clipId, 2000));
+    const clips = result.current.arrangement.tracks[0].clips;
+    expect(clips).toHaveLength(2);
+    expect(clips[1].recordingId).toBe("r1");
+    expect(clips[1].startMs).toBe(2000);
+    expect(clips[1].id).not.toBe(clipId);
+    expect(loadArrangement().tracks[0].clips).toHaveLength(2); // persisted
+  });
+
+  it("setClipLoop and transposeClip update the clip and persist", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+
+    act(() => result.current.setClipLoop(clipId, 3));
+    act(() => result.current.transposeClip(clipId, -4));
+    const clip = result.current.arrangement.tracks[0].clips[0];
+    expect(clip.loopCount).toBe(3);
+    expect(clip.transpose).toBe(-4);
+    const persisted = loadArrangement().tracks[0].clips[0];
+    expect(persisted.loopCount).toBe(3);
+    expect(persisted.transpose).toBe(-4);
+  });
+});
