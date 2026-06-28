@@ -14,6 +14,10 @@ import {
   toggleTrackMuted,
   toggleTrackSoloed,
   toggleClipMuted,
+  duplicateClip,
+  setClipLoopCount,
+  setClipTranspose,
+  MAX_TRANSPOSE,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -273,5 +277,79 @@ describe("track mute / solo toggles", () => {
     expect(arr.tracks[0].clips[0].muted).toBeFalsy(); // original unchanged
     expect(toggleClipMuted(muted, clipId).tracks[0].clips[0].muted).toBe(false); // toggles back
     expect(toggleClipMuted(arr, "nope")).toBe(arr);
+  });
+});
+
+describe("clip editing — duplicate / loop / transpose (Slice 5)", () => {
+  const seed = (extra: Partial<import("./arrangement").ClipInstance> = {}) => {
+    const base = newArrangement();
+    const tid = base.tracks[0].id;
+    let arr = addClip(base, tid, "rec-1", 1000);
+    const clipId = arr.tracks[0].clips[0].id;
+    if (Object.keys(extra).length) {
+      arr = { ...arr, tracks: arr.tracks.map((t) => (t.id === tid ? { ...t, clips: [{ ...t.clips[0], ...extra }] } : t)) };
+    }
+    return { arr, clipId, tid };
+  };
+
+  describe("duplicateClip", () => {
+    it("inserts a copy with a fresh id right after the original on the same track", () => {
+      const { arr, clipId } = seed();
+      const next = duplicateClip(arr, clipId, 3000);
+      expect(next.tracks[0].clips).toHaveLength(2);
+      const [orig, copy] = next.tracks[0].clips;
+      expect(copy.id).not.toBe(orig.id); // fresh id
+      expect(copy.recordingId).toBe("rec-1");
+      expect(copy.startMs).toBe(3000); // placed where the caller asked (clamped >= 0)
+      expect(orig.startMs).toBe(1000); // original untouched
+    });
+
+    it("preserves the original's edits (transpose / loop / trim / mute) on the copy", () => {
+      const { arr, clipId } = seed({ transpose: 5, loopCount: 3, trimStartMs: 200, trimEndMs: 800, muted: true });
+      const copy = duplicateClip(arr, clipId, 0).tracks[0].clips[1];
+      expect(copy).toMatchObject({ transpose: 5, loopCount: 3, trimStartMs: 200, trimEndMs: 800, muted: true });
+    });
+
+    it("clamps a negative target to 0; is immutable; unknown id → unchanged (same ref)", () => {
+      const { arr, clipId } = seed();
+      expect(duplicateClip(arr, clipId, -500).tracks[0].clips[1].startMs).toBe(0);
+      expect(arr.tracks[0].clips).toHaveLength(1); // original arrangement unchanged
+      expect(duplicateClip(arr, "no-such-clip", 0)).toBe(arr);
+    });
+  });
+
+  describe("setClipLoopCount", () => {
+    it("sets a whole loop count >= 1; clamps <1 / NaN to 1; truncates fractional", () => {
+      const { arr, clipId } = seed();
+      expect(setClipLoopCount(arr, clipId, 4).tracks[0].clips[0].loopCount).toBe(4);
+      expect(setClipLoopCount(arr, clipId, 0).tracks[0].clips[0].loopCount).toBe(1);
+      expect(setClipLoopCount(arr, clipId, -3).tracks[0].clips[0].loopCount).toBe(1);
+      expect(setClipLoopCount(arr, clipId, Number.NaN).tracks[0].clips[0].loopCount).toBe(1);
+      expect(setClipLoopCount(arr, clipId, 2.9).tracks[0].clips[0].loopCount).toBe(2);
+    });
+    it("is immutable; unknown id → unchanged (same ref)", () => {
+      const { arr, clipId } = seed();
+      setClipLoopCount(arr, clipId, 9);
+      expect(arr.tracks[0].clips[0].loopCount).toBe(1);
+      expect(setClipLoopCount(arr, "nope", 2)).toBe(arr);
+    });
+  });
+
+  describe("setClipTranspose", () => {
+    it("sets semitones; clamps to ±MAX_TRANSPOSE; truncates fractional; NaN → 0", () => {
+      const { arr, clipId } = seed();
+      expect(setClipTranspose(arr, clipId, 7).tracks[0].clips[0].transpose).toBe(7);
+      expect(setClipTranspose(arr, clipId, -7).tracks[0].clips[0].transpose).toBe(-7);
+      expect(setClipTranspose(arr, clipId, 999).tracks[0].clips[0].transpose).toBe(MAX_TRANSPOSE);
+      expect(setClipTranspose(arr, clipId, -999).tracks[0].clips[0].transpose).toBe(-MAX_TRANSPOSE);
+      expect(setClipTranspose(arr, clipId, 3.9).tracks[0].clips[0].transpose).toBe(3);
+      expect(setClipTranspose(arr, clipId, Number.NaN).tracks[0].clips[0].transpose).toBe(0);
+    });
+    it("is immutable; unknown id → unchanged (same ref)", () => {
+      const { arr, clipId } = seed();
+      setClipTranspose(arr, clipId, 5);
+      expect(arr.tracks[0].clips[0].transpose).toBe(0);
+      expect(setClipTranspose(arr, "nope", 5)).toBe(arr);
+    });
   });
 });

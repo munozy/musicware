@@ -33,6 +33,9 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     toggleMute,
     toggleSolo,
     toggleClipMute,
+    duplicateClip,
+    setClipLoop,
+    transposeClip,
     previewRecording,
     play,
     stop,
@@ -75,9 +78,14 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
           isPlaying={isPlaying}
           playStartedAt={playStartedAt}
           onPlaceClip={placeClip}
-          onMoveClip={moveClip}
-          onRemoveClip={removeClip}
-          onToggleClipMute={toggleClipMute}
+          clipOps={{
+            onMoveClip: moveClip,
+            onRemoveClip: removeClip,
+            onToggleClipMute: toggleClipMute,
+            onDuplicateClip: duplicateClip,
+            onSetClipLoop: setClipLoop,
+            onTransposeClip: transposeClip,
+          }}
           trackOps={{
             onAddTrack: addTrack,
             onRenameTrack: renameTrack,

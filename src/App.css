@@ -1212,3 +1212,105 @@ kbd {
 .timeline-clip.muted .timeline-clip-label {
   text-decoration: line-through;
 }
+
+/* --- Slice 5: clip editing — duplicate button, loop/transpose steppers + state badges --- */
+.timeline-clip-dup {
+  position: absolute;
+  top: 2px;
+  right: 42px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.timeline-clip:hover .timeline-clip-dup,
+.timeline-clip:focus-within .timeline-clip-dup,
+.timeline-clip-dup:focus {
+  opacity: 1;
+}
+.timeline-clip-dup:hover {
+  background: var(--accent);
+}
+
+/* Read-only state badges (always visible when non-default); hidden while the edit strip shows. */
+.timeline-clip-badges {
+  position: absolute;
+  left: 5px;
+  bottom: 3px;
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+.clip-badge {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+.clip-badge-transpose {
+  background: rgba(31, 168, 160, 0.75);
+}
+.timeline-clip:hover .timeline-clip-badges,
+.timeline-clip:focus-within .timeline-clip-badges {
+  opacity: 0;
+}
+
+/* Editing steppers — appear on hover/focus along the clip's bottom edge. */
+.timeline-clip-edit {
+  position: absolute;
+  left: 4px;
+  bottom: 2px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.timeline-clip:hover .timeline-clip-edit,
+.timeline-clip:focus-within .timeline-clip-edit {
+  opacity: 1;
+}
+.clip-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+.clip-stepper-btn {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.clip-stepper-btn:hover {
+  background: var(--accent);
+}
+.clip-stepper-val {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  min-width: 16px;
+  text-align: center;
+}

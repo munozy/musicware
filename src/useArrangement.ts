@@ -20,6 +20,9 @@ import {
   toggleTrackMuted as toggleTrackMutedStore,
   toggleTrackSoloed as toggleTrackSoloedStore,
   toggleClipMuted as toggleClipMutedStore,
+  duplicateClip as duplicateClipStore,
+  setClipLoopCount as setClipLoopCountStore,
+  setClipTranspose as setClipTransposeStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import type { Recording } from "./recordings";
@@ -92,6 +95,17 @@ export function useArrangement() {
   /** Mute / unmute a single placed clip (per-brick). */
   const toggleClipMute = useCallback((clipId: string) => {
     setArrangement((prev) => toggleClipMutedStore(prev, clipId));
+  }, []);
+
+  /** Clip editing (Slice 5, US-13/15/16). The scheduler already honours every field. */
+  const duplicateClip = useCallback((clipId: string, atMs: number) => {
+    setArrangement((prev) => duplicateClipStore(prev, clipId, atMs));
+  }, []);
+  const setClipLoop = useCallback((clipId: string, count: number) => {
+    setArrangement((prev) => setClipLoopCountStore(prev, clipId, count));
+  }, []);
+  const transposeClip = useCallback((clipId: string, semitones: number) => {
+    setArrangement((prev) => setClipTransposeStore(prev, clipId, semitones));
   }, []);
 
   /** Stop any in-progress recording preview and release its notes. */
@@ -198,6 +212,9 @@ export function useArrangement() {
     toggleMute,
     toggleSolo,
     toggleClipMute,
+    duplicateClip,
+    setClipLoop,
+    transposeClip,
     previewRecording,
     stopPreview,
     play,

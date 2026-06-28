@@ -75,15 +75,38 @@ function toMap(recordings: Recording[] | Map<string, Recording>): Map<string, Re
 }
 
 /**
+ * The trim window of ONE loop iteration, clamped to the recording's real duration.
+ * `trimStartMs`/`trimEndMs` are nullable (untrimmed ⇒ the full `[0, durationMs]`). Shared
+ * by the scheduler (`flattenClip`) and the UI (clip-block width) so the picture on the
+ * timeline always matches what actually plays.
+ */
+export function clipWindow(
+  clip: Pick<ClipInstance, "trimStartMs" | "trimEndMs">,
+  durationMs: number,
+): { ws: number; we: number; windowLen: number } {
+  const dur = Math.max(0, durationMs);
+  const ws = Math.max(0, Math.min(clip.trimStartMs ?? 0, dur));
+  const we = Math.max(ws, Math.min(clip.trimEndMs ?? dur, dur));
+  return { ws, we, windowLen: we - ws };
+}
+
+/** Total played length = trimmed window × loopCount (ms). Drives the clip-block width. */
+export function clipPlayedMs(
+  clip: Pick<ClipInstance, "trimStartMs" | "trimEndMs" | "loopCount">,
+  durationMs: number,
+): number {
+  const loops = Math.max(1, Math.floor(clip.loopCount || 1));
+  return clipWindow(clip, durationMs).windowLen * loops;
+}
+
+/**
  * Expand a single clip instance into absolute-timed events. Pure; never throws on a
  * dangling/degenerate clip (returns []). Each loop iteration force-closes notes still
  * held at the window end — that is the per-clip half of the no-stranded-note guarantee.
  */
 function flattenClip(clip: ClipInstance, rec: Recording): ScheduledEvent[] {
   const dur = Math.max(0, rec.durationMs);
-  const ws = Math.max(0, Math.min(clip.trimStartMs ?? 0, dur));
-  const we = Math.max(ws, Math.min(clip.trimEndMs ?? dur, dur));
-  const windowLen = we - ws;
+  const { ws, we, windowLen } = clipWindow(clip, dur);
   if (windowLen <= 0) return []; // degenerate trim window — nothing to play
 
   const loopCount = Math.max(1, Math.floor(clip.loopCount || 1));

@@ -3,6 +3,8 @@ import {
   flattenArrangement,
   playArrangement,
   pendingNotesAfter,
+  clipWindow,
+  clipPlayedMs,
   type Arrangement,
   type Track,
   type ClipInstance,
@@ -440,5 +442,43 @@ describe("playArrangement — dispatch order", () => {
     );
     vi.advanceTimersByTime(500);
     expect(out).toEqual(["on", "off", "on"]); // release before re-press at t=500, via the player
+  });
+});
+
+describe("clipWindow / clipPlayedMs — the UI/scheduler shared geometry (Slice 5)", () => {
+  it("clipWindow: untrimmed clip spans the whole recording", () => {
+    expect(clipWindow({ trimStartMs: null, trimEndMs: null }, 2000)).toEqual({ ws: 0, we: 2000, windowLen: 2000 });
+  });
+
+  it("clipWindow: trim values clamp into [0, durationMs] and ws never exceeds we", () => {
+    expect(clipWindow({ trimStartMs: 500, trimEndMs: 1500 }, 2000)).toEqual({ ws: 500, we: 1500, windowLen: 1000 });
+    // over-long trimEnd clamps to durationMs; negative trimStart clamps to 0
+    expect(clipWindow({ trimStartMs: -100, trimEndMs: 9999 }, 2000)).toEqual({ ws: 0, we: 2000, windowLen: 2000 });
+    // inverted window (start past end) collapses to zero length, not negative
+    expect(clipWindow({ trimStartMs: 1800, trimEndMs: 400 }, 2000).windowLen).toBe(0);
+  });
+
+  it("clipPlayedMs: trimmed window × loopCount, with loopCount clamped to a whole number >= 1", () => {
+    expect(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 1 }, 2000)).toBe(2000);
+    expect(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 3 }, 2000)).toBe(6000);
+    expect(clipPlayedMs({ trimStartMs: 500, trimEndMs: 1000, loopCount: 4 }, 2000)).toBe(2000); // 500ms × 4
+    expect(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 0 }, 2000)).toBe(2000); // clamps to ×1
+    expect(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 2.9 }, 2000)).toBe(4000); // truncates to ×2
+  });
+
+  it("clipPlayedMs equals the scheduler's actual span (last off − first on) for a looped clip", () => {
+    // Pin the invariant the width relies on: the block width == what the scheduler lays out.
+    const r = rec("r1", 1000, [
+      { t: 0, kind: "preset", index: 0 },
+      { t: 0, kind: "on", note: 60 },
+      { t: 1000, kind: "off", note: 60 },
+    ]);
+    const ev = flattenArrangement(
+      arr([track({ id: "t1", clips: [clip({ recordingId: "r1", startMs: 0, loopCount: 3 })] })]),
+      [r],
+    );
+    const offs = ev.filter((e) => e.kind === "off").map((e) => e.t);
+    const lastOff = Math.max(...offs);
+    expect(lastOff).toBe(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 3 }, 1000)); // 3000
   });
 });
