@@ -7,6 +7,7 @@ import {
   saveRecordings,
   type RecEvent,
   type Recording,
+  type VoiceEffect,
 } from "./recordings";
 
 /** How long a deleted take can be undone before the removal is final. */
@@ -167,6 +168,18 @@ export function useRecorder() {
     setRecordings((list) => list.map((r) => (r.id === id ? { ...r, name: trimmed } : r)));
   }, []);
 
+  /** Append a finished take to the shared library (used by voice capture — ADR-0009). */
+  const addRecording = useCallback((rec: Recording) => {
+    setRecordings((list) => [...list, rec]);
+  }, []);
+
+  /** Set a voice take's non-destructive effect. No-op for a non-voice take / unknown id. */
+  const setVoiceEffect = useCallback((id: string, effect: VoiceEffect) => {
+    setRecordings((list) =>
+      list.map((r) => (r.id === id && r.audio ? { ...r, audio: { ...r.audio, effect } } : r)),
+    );
+  }, []);
+
   // Soft delete: drop the take from the list (and storage) immediately, but stash
   // it for UNDO_MS so a misclick is recoverable. Only one undo slot — a second
   // delete finalizes the previous one (it stays removed). The undo is in-memory
@@ -230,5 +243,7 @@ export function useRecorder() {
     rename,
     remove,
     undoDelete,
+    addRecording,
+    setVoiceEffect,
   };
 }

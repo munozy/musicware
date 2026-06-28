@@ -52,4 +52,25 @@ describe("ModeToggle", () => {
     render(<ModeToggle mode="play" onChange={vi.fn()} isRecording={false} />);
     expect(screen.getByRole("group", { name: /view mode/i })).toBeDefined();
   });
+
+  it("renders the Voice segment and fires onChange('voice') on click", () => {
+    const onChange = vi.fn();
+    render(<ModeToggle mode="play" onChange={onChange} isRecording={false} />);
+    const voiceBtn = screen.getByRole("button", { name: /voice/i });
+    expect(voiceBtn).toBeDefined();
+    fireEvent.click(voiceBtn);
+    expect(onChange).toHaveBeenCalledWith("voice");
+  });
+
+  it("ArrowRight moves Play → Voice (one step, not straight to Song)", () => {
+    const onChange = vi.fn();
+    render(<ModeToggle mode="play" onChange={onChange} isRecording={false} />);
+    fireEvent.keyDown(screen.getByRole("group", { name: /view mode/i }), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenCalledWith("voice");
+  });
+
+  it("Voice stays enabled while recording (only Song is blocked)", () => {
+    render(<ModeToggle mode="play" onChange={vi.fn()} isRecording={true} />);
+    expect((screen.getByRole("button", { name: /voice/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

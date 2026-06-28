@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required so the WKWebView's getUserMedia() can prompt for and use the microphone
+	     (voice recording — ADR-0009). Without this string macOS denies mic access silently. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>musicware records your voice so you can add it to your songs with fun effects.</string>
+</dict>
+</plist>

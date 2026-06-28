@@ -5,6 +5,7 @@ import {
   newId,
   nextName,
   formatDuration,
+  isVoice,
   type Recording,
 } from "./recordings";
 
@@ -46,6 +47,20 @@ describe("nextName", () => {
     // Deleting the middle still yields a unique next name.
     const list = [mk("Composition 1"), mk("Composition 3"), mk("My Jam")];
     expect(nextName(list)).toBe("Composition 4");
+  });
+
+  it("uses a custom prefix (voice takes get 'Voice N', independent of Composition numbers)", () => {
+    const list = [mk("Composition 5"), mk("Voice 1"), mk("Voice 2")];
+    expect(nextName(list, "Voice")).toBe("Voice 3");
+    expect(nextName(list)).toBe("Composition 6"); // the Composition counter is unaffected
+  });
+});
+
+describe("isVoice", () => {
+  it("is true only for kind === 'voice' (undefined ⇒ keyboard, back-compat)", () => {
+    expect(isVoice({ ...mk("a"), kind: "voice" })).toBe(true);
+    expect(isVoice({ ...mk("b"), kind: "keyboard" })).toBe(false);
+    expect(isVoice(mk("c"))).toBe(false); // no kind ⇒ legacy keyboard take
   });
 });
 

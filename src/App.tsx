@@ -10,14 +10,21 @@ import Transport from "./Transport";
 import Library from "./Library";
 import ModeToggle, { type AppMode } from "./ModeToggle";
 import SongView from "./SongView";
+import VoiceView from "./VoiceView";
 import { useRecorder } from "./useRecorder";
+import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVisualizerStyle } from "./useVisualizerStyle";
+import { isVoice } from "./recordings";
 
 function App() {
   const rec = useRecorder();
+  const voice = useVoiceRecorder({ recordings: rec.recordings, onSave: rec.addRecording });
   const [vizStyle, setVizStyle] = useVisualizerStyle();
   const recordBtnRef = useRef<HTMLButtonElement>(null);
   const [mode, setMode] = useState<AppMode>("play");
+  // Keep mode in a ref so the once-bound R-key listener can read it without re-binding.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   // R toggles record/stop (ignored while typing in a field). Keep the latest
   // toggle in a ref so the listener binds once.
@@ -30,6 +37,7 @@ function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() !== "r") return;
+      if (modeRef.current !== "play") return; // R is the keyboard recorder — only in Play
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       e.preventDefault();
@@ -62,11 +70,11 @@ function App() {
         <VolumeControl />
       </header>
 
-      {mode === "play" ? (
+      {mode === "play" && (
         <>
           <div className="body">
             <Library
-              recordings={rec.recordings}
+              recordings={rec.recordings.filter((r) => !isVoice(r))}
               playingId={rec.playingId}
               playProgress={rec.playProgress}
               pendingDelete={rec.pendingDelete}
@@ -94,12 +102,30 @@ function App() {
             <Keyboard />
           </footer>
         </>
-      ) : (
-        <main className="song-main">
-          <SongView
-            recordings={rec.recordings}
-            onGoToPlay={() => setMode("play")}
+      )}
+
+      {mode === "voice" && (
+        <main className="voice-main">
+          <VoiceView
+            voiceTakes={rec.recordings.filter(isVoice)}
+            isRecording={voice.isRecording}
+            elapsedMs={voice.elapsedMs}
+            error={voice.error}
+            previewingId={voice.previewingId}
+            onStart={voice.startRecording}
+            onStop={voice.stopRecording}
+            onPreview={voice.preview}
+            onStopPreview={voice.stopPreview}
+            onSetEffect={rec.setVoiceEffect}
+            onRename={rec.rename}
+            onDelete={rec.remove}
           />
+        </main>
+      )}
+
+      {mode === "song" && (
+        <main className="song-main">
+          <SongView recordings={rec.recordings} onGoToPlay={() => setMode("play")} />
         </main>
       )}
     </div>

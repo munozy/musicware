@@ -3,13 +3,41 @@ import type { SynthEvent } from "./synth";
 /** A captured event, timestamped in ms from the start of the take. */
 export type RecEvent = SynthEvent & { t: number };
 
+/** The funny-voice effects, applied non-destructively at playback (ADR-0009). */
+export type VoiceEffect =
+  | "none"
+  | "distortion"
+  | "chipmunk"
+  | "monster"
+  | "robot"
+  | "echo"
+  | "telephone"
+  | "reverb";
+
+/** Reference to a voice take's raw audio (the Blob lives in IndexedDB, keyed by blobKey). */
+export type VoiceAudioRef = {
+  blobKey: string;
+  mimeType: string;
+  effect: VoiceEffect;
+};
+
 export type Recording = {
   id: string;
   name: string;
   createdAt: number; // epoch ms
   durationMs: number;
+  /** undefined ⇒ "keyboard" (back-compat with every take saved before ADR-0009). */
+  kind?: "keyboard" | "voice";
+  /** Symbolic stream for keyboard takes; empty for voice takes. */
   events: RecEvent[];
+  /** Present only for voice takes (kind === "voice"). */
+  audio?: VoiceAudioRef;
 };
+
+/** A voice take carries audio, not notes. */
+export function isVoice(rec: Recording): boolean {
+  return rec.kind === "voice";
+}
 
 const STORAGE_KEY = "musicware.recordings.v1";
 
@@ -43,13 +71,14 @@ export function newId(): string {
  * Next default name: "Composition N" where N is one past the highest existing
  * "Composition <number>" — so it stays unique even after middle items are deleted.
  */
-export function nextName(list: Recording[]): string {
+export function nextName(list: Recording[], prefix = "Composition"): string {
+  const re = new RegExp(`^${prefix} (\\d+)$`);
   let max = 0;
   for (const r of list) {
-    const m = /^Composition (\d+)$/.exec(r.name.trim());
+    const m = re.exec(r.name.trim());
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return `Composition ${max + 1}`;
+  return `${prefix} ${max + 1}`;
 }
 
 /** mm:ss for the UI. */
