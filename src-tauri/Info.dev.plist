@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Dev-mode counterpart of Info.plist: Tauri merges Info.dev.plist during `tauri dev`
+	     so the WKWebView can prompt for the microphone while developing (voice — ADR-0009). -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>musicware records your voice so you can add it to your songs with fun effects.</string>
+</dict>
+</plist>
