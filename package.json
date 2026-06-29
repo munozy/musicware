@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "version:set": "node scripts/bump-version.mjs",
+    "app-name:set": "node scripts/set-app-name.mjs",
+    "release": "tauri build"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
