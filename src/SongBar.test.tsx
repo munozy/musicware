@@ -15,6 +15,8 @@ const baseProps = () => ({
   onRename: vi.fn(),
   onDelete: vi.fn(),
   onExport: vi.fn(),
+  onExportProject: vi.fn(),
+  onImportProject: vi.fn(),
   exporting: false,
 });
 
@@ -62,17 +64,25 @@ describe("SongBar", () => {
 
   it("Export calls onExport with the chosen format (defaults to mp3; switch to wav)", () => {
     render(<SongBar {...p} />);
-    fireEvent.click(screen.getByRole("button", { name: /export song/i }));
+    fireEvent.click(screen.getByRole("button", { name: /export audio/i }));
     expect(p.onExport).toHaveBeenLastCalledWith("mp3"); // default
 
     fireEvent.change(screen.getByRole("combobox", { name: /export format/i }), { target: { value: "wav" } });
-    fireEvent.click(screen.getByRole("button", { name: /export song/i }));
+    fireEvent.click(screen.getByRole("button", { name: /export audio/i }));
     expect(p.onExport).toHaveBeenLastCalledWith("wav");
+  });
+
+  it("Save Project / Open Project call their handlers", () => {
+    render(<SongBar {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: /save project/i }));
+    expect(p.onExportProject).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: /open project/i }));
+    expect(p.onImportProject).toHaveBeenCalledOnce();
   });
 
   it("shows 'Exporting…' and disables the controls while exporting", () => {
     render(<SongBar {...p} exporting={true} />);
-    const btn = screen.getByRole("button", { name: /export song/i }) as HTMLButtonElement;
+    const btn = screen.getByRole("button", { name: /export audio/i }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.textContent).toMatch(/exporting/i);
     expect((screen.getByRole("combobox", { name: /export format/i }) as HTMLSelectElement).disabled).toBe(true);

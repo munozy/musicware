@@ -312,6 +312,17 @@ export function useArrangement() {
     setSongs((prev) => prev.map((s) => (s.id === id ? { ...s, name: trimmed } : s)));
   }, []);
 
+  /** Add an imported song (already remapped to fresh ids) to the library and switch to it. */
+  const importSong = useCallback(
+    (song: Arrangement) => {
+      stopInternal();
+      stopPreview();
+      setSongs((prev) => [...prev, song]);
+      setActiveSongId(song.id);
+    },
+    [stopInternal, stopPreview],
+  );
+
   /** Delete a song. Refuses the last one; if the active song goes, fall back to the first remaining. */
   const deleteSong = useCallback(
     (id: string) => {
@@ -343,6 +354,7 @@ export function useArrangement() {
     selectSong,
     renameSong,
     deleteSong,
+    importSong,
     isPlaying,
     playStartedAt,
     previewingId,

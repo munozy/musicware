@@ -17,10 +17,23 @@ type Props = {
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
   onExport: (format: ExportFormat) => void;
+  onExportProject: () => void;
+  onImportProject: () => void;
   exporting: boolean;
 };
 
-export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename, onDelete, onExport, exporting }: Props) {
+export default function SongBar({
+  songs,
+  activeSongId,
+  onSelect,
+  onNew,
+  onRename,
+  onDelete,
+  onExport,
+  onExportProject,
+  onImportProject,
+  exporting,
+}: Props) {
   const active = songs.find((s) => s.id === activeSongId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(active?.name ?? "");
@@ -121,27 +134,47 @@ export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename
         </button>
       )}
 
-      <span className="song-bar-export-group">
-        <select
-          className="song-bar-format"
-          value={format}
-          onChange={(e) => setFormat(e.target.value as ExportFormat)}
-          disabled={exporting}
-          aria-label="Export format"
-          title="Export format"
-        >
-          <option value="mp3">MP3</option>
-          <option value="wav">WAV</option>
-        </select>
+      <span className="song-bar-actions">
         <button
-          className="song-bar-btn song-bar-export"
-          onClick={() => onExport(format)}
+          className="song-bar-btn"
+          onClick={onImportProject}
           disabled={exporting}
-          aria-label="Export song"
-          title={`Export as ${format.toUpperCase()}`}
+          aria-label="Open project"
+          title="Open a .mwsong project file"
         >
-          {exporting ? "Exporting…" : "⬇ Export"}
+          📂 Open
         </button>
+        <button
+          className="song-bar-btn"
+          onClick={onExportProject}
+          disabled={exporting}
+          aria-label="Save project"
+          title="Save the whole project (song + its recordings) to a .mwsong file"
+        >
+          💾 Save Project
+        </button>
+        <span className="song-bar-export-group">
+          <select
+            className="song-bar-format"
+            value={format}
+            onChange={(e) => setFormat(e.target.value as ExportFormat)}
+            disabled={exporting}
+            aria-label="Export format"
+            title="Audio export format"
+          >
+            <option value="mp3">MP3</option>
+            <option value="wav">WAV</option>
+          </select>
+          <button
+            className="song-bar-btn song-bar-export"
+            onClick={() => onExport(format)}
+            disabled={exporting}
+            aria-label="Export audio"
+            title={`Export audio as ${format.toUpperCase()}`}
+          >
+            {exporting ? "Exporting…" : "⬇ Audio"}
+          </button>
+        </span>
       </span>
     </div>
   );

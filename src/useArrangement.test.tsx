@@ -275,6 +275,16 @@ describe("useArrangement — song library CRUD", () => {
     act(() => result.current.deleteSong(result.current.activeSongId));
     expect(result.current.songs).toHaveLength(1); // refuses to remove the last song
   });
+
+  it("importSong adds the song and switches to it", () => {
+    const { result } = renderHook(() => useArrangement());
+    const before = result.current.songs.length;
+    const imported = { ...newArrangement(), name: "Imported" };
+    act(() => result.current.importSong(imported));
+    expect(result.current.songs).toHaveLength(before + 1);
+    expect(result.current.activeSongId).toBe(imported.id);
+    expect(result.current.arrangement.name).toBe("Imported");
+  });
 });
 
 describe("useArrangement — removeClip + playhead timing", () => {
