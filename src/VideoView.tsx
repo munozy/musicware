@@ -10,7 +10,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { useVideo } from "./useVideo";
 import { loadSongs, addSongToLibrary } from "./songsStore";
-import { songDurationMs } from "./exportSong";
+import { renderMixedSong, songDurationMs } from "./exportSong";
+import { recordVideo, pickVideoMime } from "./videoExport";
 import { imagesTotalMs } from "./videoStore";
 import {
   buildVideoBundle,
@@ -114,6 +115,56 @@ export default function VideoView({ recordings, onAddRecordings, onGoToSong }: P
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onAddRecordings]);
+
+  // Export the clip to a video file (MP4 if the webview supports it, else WebM) — real-time.
+  const handleExportVideo = useCallback(async () => {
+    setStatusMsg(null);
+    if (images.length === 0) {
+      setStatusMsg("Add at least one image first.");
+      return;
+    }
+    const picked = pickVideoMime();
+    if (!picked) {
+      setStatusMsg("This build can't record video.");
+      return;
+    }
+    const safeName = (v.project.name || "video").replace(/[^\w.-]+/g, "_");
+    let path: string | null = null;
+    try {
+      path = await save({
+        defaultPath: `${safeName}.${picked.ext}`,
+        filters: [{ name: `${picked.ext.toUpperCase()} video`, extensions: [picked.ext] }],
+      });
+    } catch (e) {
+      console.error("save dialog failed", e);
+      setStatusMsg("Couldn't open the save dialog.");
+      return;
+    }
+    if (!path) return;
+    setBusy(true);
+    setStatusMsg("Rendering video… (plays in real time)");
+    try {
+      const songArr = loadSongs().songs.find((s) => s.id === v.project.songId) ?? null;
+      const audioBuffer = songArr ? await renderMixedSong(songArr, recordings) : null;
+      const durationMs = audioBuffer ? audioBuffer.duration * 1000 : imagesTotalMs(v.project);
+      const imgInputs = images
+        .map((i) => ({ url: v.imageUrls[i.imageKey], durationMs: i.durationMs }))
+        .filter((i): i is { url: string; durationMs: number } => !!i.url);
+      const { blob, ext } = await recordVideo({
+        images: imgInputs,
+        audioBuffer,
+        durationMs,
+        onProgress: (f) => setStatusMsg(`Rendering video… ${Math.round(f * 100)}%`),
+      });
+      await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+      setStatusMsg(`Exported ${ext.toUpperCase()} video ✓`);
+    } catch (e) {
+      console.error("video export failed", e);
+      setStatusMsg(e instanceof Error ? e.message : "Video export failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [images, v.project, v.imageUrls, recordings]);
 
   return (
     <div className="video-view">
@@ -243,6 +294,15 @@ export default function VideoView({ recordings, onAddRecordings, onGoToSong }: P
           {images.length} image{images.length === 1 ? "" : "s"} · {formatDuration(totalMs)}
           {chosenSong ? ` / ${formatDuration(songMs)} song` : ""}
         </span>
+        <button
+          className="song-bar-btn video-export-btn"
+          onClick={handleExportVideo}
+          disabled={busy || images.length === 0}
+          aria-label="Export video"
+          title="Render this clip to a video file (real time)"
+        >
+          {busy ? "Working…" : "🎬 Export video"}
+        </button>
       </div>
 
       <ul className="video-strip" aria-label="Image timeline">
