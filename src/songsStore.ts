@@ -74,6 +74,16 @@ export function loadSongs(): { songs: Arrangement[]; activeId: string } {
   return { songs, activeId };
 }
 
+/**
+ * Append a song to the persisted library (used by video-project import, which adds the
+ * embedded soundtrack from outside the useArrangement hook). Keeps the current active id; a
+ * mounted useArrangement re-reads this on its next mount.
+ */
+export function addSongToLibrary(song: Arrangement): void {
+  const { songs, activeId } = loadSongs();
+  saveSongs([...songs, song], activeId);
+}
+
 /** Persist the whole library + active id (try/catch like the other stores). */
 export function saveSongs(songs: Arrangement[], activeId: string): void {
   try {

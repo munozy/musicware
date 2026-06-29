@@ -5,25 +5,37 @@
  * export come next). State lives in useVideo; the song list is read from the songs library.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useState } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { useVideo } from "./useVideo";
-import { loadSongs } from "./songsStore";
+import { loadSongs, addSongToLibrary } from "./songsStore";
 import { songDurationMs } from "./exportSong";
 import { imagesTotalMs } from "./videoStore";
+import {
+  buildVideoBundle,
+  serializeVideoBundle,
+  parseVideoBundle,
+  importVideoBundle,
+  VIDEO_EXT,
+} from "./videoProject";
 import { formatDuration, type Recording } from "./recordings";
 
 type Props = {
   recordings: Recording[];
+  onAddRecordings: (recs: Recording[]) => void;
   onGoToSong: () => void;
 };
 
-export default function VideoView({ recordings, onGoToSong }: Props) {
+export default function VideoView({ recordings, onAddRecordings, onGoToSong }: Props) {
   const v = useVideo();
-  // Snapshot the songs for the soundtrack picker (re-read each time the Video section mounts).
-  const songs = useMemo(() => loadSongs().songs, []);
+  // The songs available as soundtracks. Stateful so an imported song appears immediately.
+  const [songs, setSongs] = useState(() => loadSongs().songs);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(v.project.name);
+  const [busy, setBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   const chosenSong = songs.find((s) => s.id === v.project.songId) ?? null;
   const songMs = chosenSong ? songDurationMs(chosenSong, recordings) : 0;
@@ -37,6 +49,71 @@ export default function VideoView({ recordings, onGoToSong }: Props) {
     if (draftName.trim() && draftName.trim() !== v.project.name) v.renameActive(draftName.trim());
     else setDraftName(v.project.name);
   };
+
+  // Save the video project (images + the soundtrack song bundle) to a .mwvid file.
+  const handleSaveProject = useCallback(async () => {
+    setStatusMsg(null);
+    const safeName = (v.project.name || "video").replace(/[^\w.-]+/g, "_");
+    let path: string | null = null;
+    try {
+      path = await save({
+        defaultPath: `${safeName}.${VIDEO_EXT}`,
+        filters: [{ name: "musicware video project", extensions: [VIDEO_EXT] }],
+      });
+    } catch (e) {
+      console.error("save dialog failed", e);
+      setStatusMsg("Couldn't open the save dialog.");
+      return;
+    }
+    if (!path) return;
+    setBusy(true);
+    try {
+      const songArr = loadSongs().songs.find((s) => s.id === v.project.songId) ?? null;
+      const bundle = await buildVideoBundle(v.project, songArr, recordings);
+      await writeFile(path, new TextEncoder().encode(serializeVideoBundle(bundle)));
+      setStatusMsg("Video project saved ✓");
+    } catch (e) {
+      console.error("video project save failed", e);
+      setStatusMsg("Couldn't save the project.");
+    } finally {
+      setBusy(false);
+    }
+  }, [v.project, recordings]);
+
+  // Open a .mwvid: restore its song (+ recordings) into the libraries, then the video project.
+  const handleOpenProject = useCallback(async () => {
+    setStatusMsg(null);
+    let selected: string | string[] | null = null;
+    try {
+      selected = await open({ multiple: false, filters: [{ name: "musicware video project", extensions: [VIDEO_EXT] }] });
+    } catch (e) {
+      console.error("open dialog failed", e);
+      setStatusMsg("Couldn't open the file dialog.");
+      return;
+    }
+    const file = Array.isArray(selected) ? selected[0] : selected;
+    if (!file) return;
+    setBusy(true);
+    try {
+      const text = new TextDecoder().decode(await readFile(file));
+      const bundle = parseVideoBundle(text);
+      const { project, song, recordings: recs } = await importVideoBundle(bundle);
+      if (song) {
+        onAddRecordings(recs);
+        addSongToLibrary(song);
+        setSongs(loadSongs().songs); // surface the imported song in the picker
+      }
+      v.importVideoProject(project);
+      setSelectedImageId(null);
+      setStatusMsg(`Imported "${project.name}" ✓`);
+    } catch (e) {
+      console.error("video project import failed", e);
+      setStatusMsg(e instanceof Error ? e.message : "Import failed.");
+    } finally {
+      setBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onAddRecordings]);
 
   return (
     <div className="video-view">
@@ -92,6 +169,24 @@ export default function VideoView({ recordings, onGoToSong }: Props) {
         >
           🗑
         </button>
+        <button
+          className="song-bar-btn"
+          onClick={handleOpenProject}
+          disabled={busy}
+          aria-label="Open video project"
+          title="Open a .mwvid project"
+        >
+          📂 Open
+        </button>
+        <button
+          className="song-bar-btn"
+          onClick={handleSaveProject}
+          disabled={busy}
+          aria-label="Save video project"
+          title="Save this video project (images + soundtrack) to a .mwvid file"
+        >
+          💾 Save Project
+        </button>
 
         <span className="video-song-picker">
           <label className="song-bar-label" htmlFor="video-song">
@@ -114,6 +209,12 @@ export default function VideoView({ recordings, onGoToSong }: Props) {
           {chosenSong && <span className="video-song-len">{formatDuration(songMs)}</span>}
         </span>
       </div>
+
+      {statusMsg && (
+        <p className="song-export-msg" role="status">
+          {statusMsg}
+        </p>
+      )}
 
       <div className="video-preview" aria-label="Preview">
         {selectedUrl ? (
