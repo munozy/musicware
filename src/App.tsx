@@ -95,7 +95,6 @@ function App() {
                 recordBtnRef={recordBtnRef}
                 isRecording={rec.isRecording}
                 elapsedMs={rec.elapsedMs}
-                savedCount={rec.recordings.length}
                 onStart={rec.startRecording}
                 onStop={rec.stopRecording}
               />

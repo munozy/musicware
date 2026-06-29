@@ -9,14 +9,12 @@ function Transport({
   recordBtnRef,
   isRecording,
   elapsedMs,
-  savedCount,
   onStart,
   onStop,
 }: {
   recordBtnRef: RefObject<HTMLButtonElement | null>;
   isRecording: boolean;
   elapsedMs: number;
-  savedCount: number;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -37,9 +35,11 @@ function Transport({
       <span className="rec-shortcut" aria-hidden="true">
         <kbd>Space</kbd>
       </span>
-      <span className="rec-status" aria-live="polite">
-        {isRecording ? "Recording — play the keyboard" : `${savedCount} saved`}
-      </span>
+      {isRecording && (
+        <span className="rec-status" aria-live="polite">
+          Recording — play the keyboard
+        </span>
+      )}
     </div>
   );
 }
