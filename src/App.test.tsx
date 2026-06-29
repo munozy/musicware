@@ -247,6 +247,15 @@ describe("recorder UI (Transport + Library)", () => {
     expect(screen.getByLabelText("Stop recording").getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("shows the keyboard Record button only in Play — not in Voice or Song", () => {
+    render(<App />);
+    expect(screen.getByLabelText("Record")).toBeDefined(); // Play (default)
+    fireEvent.click(screen.getByRole("button", { name: "Song" }));
+    expect(screen.queryByLabelText("Record")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Voice" }));
+    expect(screen.queryByLabelText("Record")).toBeNull(); // "Record voice" is a different label
+  });
+
   it("lists a saved take in the sidebar with duration and controls", () => {
     saveRecordings([seed()]);
     render(<App />);
