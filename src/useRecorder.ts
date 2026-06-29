@@ -173,6 +173,12 @@ export function useRecorder() {
     setRecordings((list) => [...list, rec]);
   }, []);
 
+  /** Append several takes at once (used by song-project import). No-op for an empty list. */
+  const addRecordings = useCallback((recs: Recording[]) => {
+    if (recs.length === 0) return;
+    setRecordings((list) => [...list, ...recs]);
+  }, []);
+
   /** Set a voice take's non-destructive effect. No-op for a non-voice take / unknown id. */
   const setVoiceEffect = useCallback((id: string, effect: VoiceEffect) => {
     setRecordings((list) =>
@@ -244,6 +250,7 @@ export function useRecorder() {
     remove,
     undoDelete,
     addRecording,
+    addRecordings,
     setVoiceEffect,
   };
 }

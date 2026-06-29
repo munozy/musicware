@@ -6,22 +6,30 @@
  */
 
 import { useCallback, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { useArrangement } from "./useArrangement";
 import ClipShelf from "./ClipShelf";
 import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
 import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
+import {
+  buildProjectBundle,
+  serializeProject,
+  parseProjectBundle,
+  importProjectBundle,
+  PROJECT_EXT,
+} from "./songProject";
 import type { Recording } from "./recordings";
 
 type Props = {
   recordings: Recording[];
+  onAddRecordings: (recs: Recording[]) => void;
   onGoToPlay: () => void;
 };
 
-export default function SongView({ recordings, onGoToPlay }: Props) {
+export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Props) {
   const {
     arrangement,
     songs,
@@ -30,6 +38,7 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     selectSong,
     renameSong,
     deleteSong,
+    importSong,
     isPlaying,
     playStartedAt,
     previewingId,
@@ -94,17 +103,86 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     [arrangement, recordings],
   );
 
+  // Export the editable PROJECT (song + the recordings it needs) to a .mwsong file.
+  const handleExportProject = useCallback(async () => {
+    setExportMsg(null);
+    const safeName = (arrangement.name || "song").replace(/[^\w.-]+/g, "_");
+    let path: string | null = null;
+    try {
+      path = await save({
+        defaultPath: `${safeName}.${PROJECT_EXT}`,
+        filters: [{ name: "musicware project", extensions: [PROJECT_EXT] }],
+      });
+    } catch (e) {
+      console.error("save dialog failed", e);
+      setExportMsg("Couldn't open the save dialog.");
+      return;
+    }
+    if (!path) return;
+    setExporting(true);
+    try {
+      const bundle = await buildProjectBundle(arrangement, recordings);
+      await writeFile(path, new TextEncoder().encode(serializeProject(bundle)));
+      setExportMsg("Project saved ✓");
+    } catch (e) {
+      console.error("project export failed", e);
+      setExportMsg("Couldn't save the project.");
+    } finally {
+      setExporting(false);
+    }
+  }, [arrangement, recordings]);
+
+  // Import a .mwsong project: restore its recordings (fresh ids/blobs) + add it as a new song.
+  const handleImportProject = useCallback(async () => {
+    setExportMsg(null);
+    let selected: string | string[] | null = null;
+    try {
+      selected = await open({ multiple: false, filters: [{ name: "musicware project", extensions: [PROJECT_EXT] }] });
+    } catch (e) {
+      console.error("open dialog failed", e);
+      setExportMsg("Couldn't open the file dialog.");
+      return;
+    }
+    const file = Array.isArray(selected) ? selected[0] : selected;
+    if (!file) return;
+    setExporting(true);
+    try {
+      const text = new TextDecoder().decode(await readFile(file));
+      const bundle = parseProjectBundle(text);
+      const { song, recordings: imported } = await importProjectBundle(bundle);
+      onAddRecordings(imported);
+      importSong(song);
+      setExportMsg(`Imported "${song.name}" ✓`);
+    } catch (e) {
+      console.error("project import failed", e);
+      setExportMsg(e instanceof Error ? e.message : "Import failed.");
+    } finally {
+      setExporting(false);
+    }
+  }, [onAddRecordings, importSong]);
+
   if (recordings.length === 0) {
     return (
       <div className="song-interstitial">
         <p>You haven&apos;t recorded anything yet.</p>
-        <button
-          className="song-go-record-btn"
-          aria-label="Go record"
-          onClick={onGoToPlay}
-        >
-          Go record →
-        </button>
+        <div className="song-interstitial-actions">
+          <button className="song-go-record-btn" aria-label="Go record" onClick={onGoToPlay}>
+            Go record →
+          </button>
+          <button
+            className="song-bar-btn"
+            aria-label="Open project"
+            onClick={handleImportProject}
+            disabled={exporting}
+          >
+            📂 Open a project
+          </button>
+        </div>
+        {exportMsg && (
+          <p className="song-export-msg" role="status">
+            {exportMsg}
+          </p>
+        )}
       </div>
     );
   }
@@ -119,6 +197,8 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
         onRename={renameSong}
         onDelete={deleteSong}
         onExport={handleExport}
+        onExportProject={handleExportProject}
+        onImportProject={handleImportProject}
         exporting={exporting}
       />
       {exportMsg && (

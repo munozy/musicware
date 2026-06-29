@@ -29,6 +29,7 @@ describe("SongView", () => {
     render(
       <SongView
         recordings={[makeRec("r1", "Intro")]}
+        onAddRecordings={vi.fn()}
         onGoToPlay={vi.fn()}
       />,
     );
@@ -37,14 +38,14 @@ describe("SongView", () => {
   });
 
   it("shows the interstitial when there are no recordings", () => {
-    render(<SongView recordings={[]} onGoToPlay={vi.fn()} />);
+    render(<SongView recordings={[]} onAddRecordings={vi.fn()} onGoToPlay={vi.fn()} />);
     expect(screen.getByText(/recorded/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /go record/i })).toBeDefined();
   });
 
   it("interstitial button calls onGoToPlay", () => {
     const onGoToPlay = vi.fn();
-    render(<SongView recordings={[]} onGoToPlay={onGoToPlay} />);
+    render(<SongView recordings={[]} onAddRecordings={vi.fn()} onGoToPlay={onGoToPlay} />);
     fireEvent.click(screen.getByRole("button", { name: /go record/i }));
     expect(onGoToPlay).toHaveBeenCalled();
   });
@@ -53,6 +54,7 @@ describe("SongView", () => {
     render(
       <SongView
         recordings={[makeRec("r1", "Intro")]}
+        onAddRecordings={vi.fn()}
         onGoToPlay={vi.fn()}
       />,
     );

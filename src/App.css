@@ -1018,11 +1018,25 @@ kbd {
   font-size: 0.82rem;
   color: var(--text-dim);
 }
+.song-bar-actions {
+  margin-left: auto; /* push project + export controls to the right end of the bar */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .song-bar-export-group {
-  margin-left: auto; /* push the export controls to the right end of the bar */
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+.song-interstitial-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .song-bar-format {
   background: var(--panel-strong);

@@ -314,4 +314,14 @@ describe("useRecorder — rename / delete / persistence", () => {
     expect(ids).not.toContain(aId);
     expect(loadRecordings().map((r) => r.id)).not.toContain(aId); // a stayed finalized in storage
   });
+
+  it("addRecordings appends several takes at once and persists them (song-project import)", () => {
+    const { result } = renderHook(() => useRecorder());
+    const mk = (id: string) => ({ id, name: id, createdAt: 0, durationMs: 1000, events: [] });
+    act(() => result.current.addRecordings([mk("i1"), mk("i2")]));
+    expect(result.current.recordings.map((r) => r.id)).toEqual(["i1", "i2"]);
+    expect(loadRecordings().map((r) => r.id)).toEqual(["i1", "i2"]); // persisted
+    act(() => result.current.addRecordings([])); // no-op
+    expect(result.current.recordings).toHaveLength(2);
+  });
 });
