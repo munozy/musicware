@@ -134,6 +134,11 @@ export function useVideo() {
     });
   }, []);
   const selectProject = useCallback((id: string) => setActiveId(id), []);
+  /** Add an imported video project (already remapped to fresh ids/keys) and switch to it. */
+  const importVideoProject = useCallback((p: VideoProject) => {
+    setProjects((prev) => [...prev, p]);
+    setActiveId(p.id);
+  }, []);
   const renameActive = useCallback((name: string) => setActiveProject((p) => renameProject(p, name)), [setActiveProject]);
   const deleteProject = useCallback((id: string) => {
     setProjects((prev) => {
@@ -160,6 +165,7 @@ export function useVideo() {
     setSong,
     newProject,
     selectProject,
+    importVideoProject,
     renameActive,
     deleteProject,
   };

@@ -147,7 +147,11 @@ function App() {
 
       {mode === "video" && (
         <main className="song-main">
-          <VideoView recordings={rec.recordings} onGoToSong={() => setMode("song")} />
+          <VideoView
+            recordings={rec.recordings}
+            onAddRecordings={rec.addRecordings}
+            onGoToSong={() => setMode("song")}
+          />
         </main>
       )}
     </div>
