@@ -5,6 +5,7 @@ import {
   pendingNotesAfter,
   clipWindow,
   clipPlayedMs,
+  voiceClipPlays,
   type Arrangement,
   type Track,
   type ClipInstance,
@@ -480,5 +481,65 @@ describe("clipWindow / clipPlayedMs — the UI/scheduler shared geometry (Slice 
     const offs = ev.filter((e) => e.kind === "off").map((e) => e.t);
     const lastOff = Math.max(...offs);
     expect(lastOff).toBe(clipPlayedMs({ trimStartMs: null, trimEndMs: null, loopCount: 3 }, 1000)); // 3000
+  });
+});
+
+describe("voiceClipPlays — the audio (voice) playback pass (ADR-0009)", () => {
+  const voiceRec = (id: string, durationMs = 1500, effect: import("./recordings").VoiceEffect = "none"): Recording => ({
+    id,
+    name: id,
+    createdAt: 0,
+    durationMs,
+    kind: "voice",
+    events: [],
+    audio: { blobKey: `blob-${id}`, mimeType: "audio/webm", effect },
+  });
+
+  it("emits a play descriptor for a voice clip (startMs, effect, loopCount, durationMs, blobKey)", () => {
+    const plays = voiceClipPlays(
+      arr([track({ id: "t1", clips: [clip({ recordingId: "v1", startMs: 2000, loopCount: 2 })] })]),
+      [voiceRec("v1", 1500, "robot")],
+    );
+    expect(plays).toEqual([
+      { recordingId: "v1", blobKey: "blob-v1", effect: "robot", startMs: 2000, loopCount: 2, durationMs: 1500 },
+    ]);
+  });
+
+  it("voice clips are absent from flattenArrangement (no symbolic events) — the two passes are disjoint", () => {
+    const a = arr([track({ id: "t1", clips: [clip({ recordingId: "v1" })] })]);
+    expect(flattenArrangement(a, [voiceRec("v1")])).toEqual([]);
+    expect(voiceClipPlays(a, [voiceRec("v1")])).toHaveLength(1);
+  });
+
+  it("ignores keyboard clips, dangling refs, and per-clip mute", () => {
+    const a = arr([
+      track({
+        id: "t1",
+        clips: [
+          clip({ recordingId: "kbd" }), // keyboard take — not a voice clip
+          clip({ recordingId: "gone" }), // dangling
+          clip({ recordingId: "vMuted", muted: true }), // muted voice clip
+          clip({ recordingId: "vOk", startMs: 500 }),
+        ],
+      }),
+    ]);
+    const plays = voiceClipPlays(a, [cleanNote("kbd"), voiceRec("vMuted"), voiceRec("vOk")]);
+    expect(plays.map((p) => p.recordingId)).toEqual(["vOk"]);
+  });
+
+  it("respects track mute and solo (solo wins, same gating as flattenArrangement)", () => {
+    const recs = [voiceRec("a"), voiceRec("b"), voiceRec("c")];
+    const muted = arr([
+      track({ id: "t1", clips: [clip({ recordingId: "a" })], muted: true }),
+      track({ id: "t2", clips: [clip({ recordingId: "b" })] }),
+    ]);
+    expect(voiceClipPlays(muted, recs).map((p) => p.recordingId)).toEqual(["b"]); // muted track skipped
+
+    const soloed = arr([
+      track({ id: "t1", clips: [clip({ recordingId: "a" })] }),
+      track({ id: "t2", clips: [clip({ recordingId: "b" })], soloed: true }),
+      track({ id: "t3", clips: [clip({ recordingId: "c" })] }),
+    ]);
+    expect(voiceClipPlays(soloed, recs).map((p) => p.recordingId)).toEqual(["b"]); // only soloed plays
   });
 });
