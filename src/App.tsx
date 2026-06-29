@@ -26,7 +26,7 @@ function App() {
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  // R toggles record/stop (ignored while typing in a field). Keep the latest
+  // Space toggles record/stop (ignored while typing in a field). Keep the latest
   // toggle in a ref so the listener binds once.
   const toggle = rec.isRecording ? rec.stopRecording : rec.startRecording;
   const toggleRef = useRef(toggle);
@@ -36,10 +36,12 @@ function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() !== "r") return;
-      if (modeRef.current !== "play") return; // R is the keyboard recorder — only in Play
+      if (e.code !== "Space") return; // layout-independent spacebar
+      if (modeRef.current !== "play") return; // the keyboard recorder — only in Play
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // preventDefault stops page scroll AND a focused button's native Space-activation,
+      // so Space means "record" consistently rather than double-firing.
       e.preventDefault();
       toggleRef.current();
     };
