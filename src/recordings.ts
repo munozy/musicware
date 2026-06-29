@@ -14,6 +14,19 @@ export type VoiceEffect =
   | "telephone"
   | "reverb";
 
+/** The funny-voice effects with friendly labels — shared by the Voice section and the
+ * per-clip effect picker in a Song. */
+export const VOICE_EFFECTS: { value: VoiceEffect; label: string }[] = [
+  { value: "none", label: "🎙️ Normal" },
+  { value: "distortion", label: "🤘 Distortion" },
+  { value: "chipmunk", label: "🐿️ Chipmunk" },
+  { value: "monster", label: "👹 Monster" },
+  { value: "robot", label: "🤖 Robot" },
+  { value: "echo", label: "🔊 Echo" },
+  { value: "telephone", label: "📞 Telephone" },
+  { value: "reverb", label: "🏛️ Reverb" },
+];
+
 /** Reference to a voice take's raw audio (the Blob lives in IndexedDB, keyed by blobKey). */
 export type VoiceAudioRef = {
   blobKey: string;

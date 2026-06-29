@@ -17,6 +17,16 @@ const makeRec = (id: string, durationMs = 2000): Recording => ({
   events: [],
 });
 
+const makeVoiceRec = (id: string, durationMs = 1500): Recording => ({
+  id,
+  name: id,
+  createdAt: 0,
+  durationMs,
+  kind: "voice",
+  events: [],
+  audio: { blobKey: `b-${id}`, mimeType: "audio/webm", effect: "none" },
+});
+
 const LANE_RECT = {
   left: 0, top: 0, width: 800, height: 60, right: 800, bottom: 60, x: 0, y: 0, toJSON: () => ({}),
 } as DOMRect;
@@ -51,6 +61,8 @@ describe("Timeline", () => {
   let onTransposeClip: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onTrimClip: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onSetClipEffect: any;
   let trackOps: TrackOps;
 
   beforeEach(() => {
@@ -63,6 +75,7 @@ describe("Timeline", () => {
     onSetClipLoop = vi.fn();
     onTransposeClip = vi.fn();
     onTrimClip = vi.fn();
+    onSetClipEffect = vi.fn();
     trackOps = {
       onAddTrack,
       onRenameTrack: vi.fn(),
@@ -82,7 +95,7 @@ describe("Timeline", () => {
         isPlaying={false}
         playStartedAt={null}
         onPlaceClip={onPlaceClip}
-        clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip, onTrimClip }}
+        clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip, onTrimClip, onSetClipEffect }}
         trackOps={trackOps}
       />,
     );
@@ -255,6 +268,23 @@ describe("Timeline", () => {
     const w2 = (c2.querySelector(".timeline-clip") as HTMLElement).style.width;
     expect(w1).toBe("80px"); // 2000ms × 0.04 px/ms
     expect(w2).toBe("160px"); // 4000ms × 0.04 px/ms
+  });
+
+  it("a VOICE clip shows an effect picker (not a transpose stepper) and changing it sets the effect", () => {
+    const { arr } = withClip(0); // recordingId "r1"
+    renderTL(arr, [makeVoiceRec("r1")]);
+    expect(screen.queryByRole("button", { name: /transpose up/i })).toBeNull(); // no transpose for audio
+    fireEvent.change(screen.getByRole("combobox", { name: /effect for r1 clip/i }), {
+      target: { value: "robot" },
+    });
+    expect(onSetClipEffect).toHaveBeenCalledWith("clip-1", "robot");
+  });
+
+  it("a KEYBOARD clip shows the transpose stepper, not an effect picker", () => {
+    const { arr } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    expect(screen.queryByRole("combobox", { name: /effect for/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /transpose up/i })).toBeDefined();
   });
 
   it("renders left and right trim handles on a clip", () => {

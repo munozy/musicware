@@ -505,6 +505,19 @@ describe("voiceClipPlays — the audio (voice) playback pass (ADR-0009)", () => 
     ]);
   });
 
+  it("a per-clip effect override wins over the take's effect; falls back to it when unset", () => {
+    const recs = [voiceRec("v1", 1500, "none")];
+    const overridden = voiceClipPlays(
+      arr([track({ id: "t1", clips: [clip({ recordingId: "v1", effect: "robot" })] })]),
+      recs,
+    );
+    expect(overridden[0].effect).toBe("robot"); // clip override
+    const inherited = voiceClipPlays(arr([track({ id: "t1", clips: [clip({ recordingId: "v1" })] })]), [
+      voiceRec("v1", 1500, "echo"),
+    ]);
+    expect(inherited[0].effect).toBe("echo"); // no override → take's effect
+  });
+
   it("voice clips are absent from flattenArrangement (no symbolic events) — the two passes are disjoint", () => {
     const a = arr([track({ id: "t1", clips: [clip({ recordingId: "v1" })] })]);
     expect(flattenArrangement(a, [voiceRec("v1")])).toEqual([]);

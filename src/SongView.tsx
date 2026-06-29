@@ -44,6 +44,7 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     setClipLoop,
     transposeClip,
     trimClip,
+    setClipEffect,
     previewRecording,
     play,
     stop,
@@ -102,6 +103,7 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
             onSetClipLoop: setClipLoop,
             onTransposeClip: transposeClip,
             onTrimClip: trimClip,
+            onSetClipEffect: setClipEffect,
           }}
           trackOps={{
             onAddTrack: addTrack,

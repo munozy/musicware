@@ -18,6 +18,7 @@ import {
   setClipLoopCount,
   setClipTranspose,
   setClipTrim,
+  setClipEffect,
   MAX_TRANSPOSE,
 } from "./arrangementStore";
 
@@ -382,6 +383,15 @@ describe("clip editing — duplicate / loop / transpose (Slice 5)", () => {
       setClipTrim(arr, clipId, { trimEndMs: 1000 });
       expect(arr.tracks[0].clips[0].trimEndMs).toBeUndefined();
       expect(setClipTrim(arr, "nope", { trimEndMs: 1000 })).toBe(arr);
+    });
+  });
+
+  describe("setClipEffect", () => {
+    it("sets a clip's per-instance voice effect; immutable; unknown id → unchanged", () => {
+      const { arr, clipId } = seed();
+      expect(setClipEffect(arr, clipId, "robot").tracks[0].clips[0].effect).toBe("robot");
+      expect(arr.tracks[0].clips[0].effect).toBeUndefined(); // original untouched
+      expect(setClipEffect(arr, "nope", "echo")).toBe(arr);
     });
   });
 });

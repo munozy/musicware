@@ -15,7 +15,7 @@
 
 import { useRef, useState } from "react";
 import { clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
-import type { Recording } from "./recordings";
+import { isVoice, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
 import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
 import Playhead from "./Playhead";
@@ -56,6 +56,7 @@ type ClipOps = {
   onSetClipLoop: (clipId: string, count: number) => void;
   onTransposeClip: (clipId: string, semitones: number) => void;
   onTrimClip: (clipId: string, patch: { startMs?: number; trimStartMs?: number; trimEndMs?: number }) => void;
+  onSetClipEffect: (clipId: string, effect: VoiceEffect) => void;
 };
 
 const MIN_WINDOW_MS = 100; // a trimmed brick can't be shorter than one snap step
@@ -70,11 +71,17 @@ function ClipBlock({
   onSetClipLoop,
   onTransposeClip,
   onTrimClip,
+  onSetClipEffect,
 }: { clip: ClipInstance; recordings: Recording[] } & ClipOps) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
   const loops = Math.max(1, Math.floor(clip.loopCount || 1));
   const transpose = Math.trunc(clip.transpose || 0);
+  // Voice clips edit their EFFECT (transpose is a no-op for audio); keyboard clips transpose.
+  const voice = !!rec && isVoice(rec);
+  const effect: VoiceEffect = clip.effect ?? rec?.audio?.effect ?? "none";
+  const effectLabel = VOICE_EFFECTS.find((e) => e.value === effect)?.label ?? "";
+  const effectEmoji = effectLabel.split(" ")[0];
   // Width reflects the TRIMMED window × loops, so the block on screen is exactly as long as
   // it sounds (clipPlayedMs is the same maths the scheduler loops over). Falls back to a stub
   // width for a dangling clip whose recording is gone.
@@ -191,10 +198,12 @@ function ClipBlock({
 
       <span className="timeline-clip-label">{name}</span>
 
-      {(loops > 1 || transpose !== 0) && (
+      {(loops > 1 || (voice ? effect !== "none" : transpose !== 0)) && (
         <span className="timeline-clip-badges" aria-hidden="true">
           {loops > 1 && <span className="clip-badge clip-badge-loop">×{loops}</span>}
-          {transpose !== 0 && <span className="clip-badge clip-badge-transpose">{fmtTranspose(transpose)}</span>}
+          {voice
+            ? effect !== "none" && <span className="clip-badge clip-badge-effect">{effectEmoji}</span>
+            : transpose !== 0 && <span className="clip-badge clip-badge-transpose">{fmtTranspose(transpose)}</span>}
         </span>
       )}
 
@@ -264,33 +273,54 @@ function ClipBlock({
             +
           </button>
         </span>
-        <span className="clip-stepper" role="group" aria-label={`Transpose ${name} clip`}>
-          <button
-            className="clip-stepper-btn"
-            aria-label="Transpose down a semitone"
-            title="Transpose down"
-            {...btnGuard}
-            onClick={(e) => {
+        {voice ? (
+          <select
+            className="clip-effect-select"
+            value={effect}
+            aria-label={`Effect for ${name} clip`}
+            draggable={false}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
               e.stopPropagation();
-              onTransposeClip(clip.id, transpose - 1);
+              onSetClipEffect(clip.id, e.target.value as VoiceEffect);
             }}
           >
-            −
-          </button>
-          <span className="clip-stepper-val">{fmtTranspose(transpose)}</span>
-          <button
-            className="clip-stepper-btn"
-            aria-label="Transpose up a semitone"
-            title="Transpose up"
-            {...btnGuard}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTransposeClip(clip.id, transpose + 1);
-            }}
-          >
-            +
-          </button>
-        </span>
+            {VOICE_EFFECTS.map((eff) => (
+              <option key={eff.value} value={eff.value}>
+                {eff.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="clip-stepper" role="group" aria-label={`Transpose ${name} clip`}>
+            <button
+              className="clip-stepper-btn"
+              aria-label="Transpose down a semitone"
+              title="Transpose down"
+              {...btnGuard}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTransposeClip(clip.id, transpose - 1);
+              }}
+            >
+              −
+            </button>
+            <span className="clip-stepper-val">{fmtTranspose(transpose)}</span>
+            <button
+              className="clip-stepper-btn"
+              aria-label="Transpose up a semitone"
+              title="Transpose up"
+              {...btnGuard}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTransposeClip(clip.id, transpose + 1);
+              }}
+            >
+              +
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );
