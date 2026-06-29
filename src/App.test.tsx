@@ -310,7 +310,7 @@ describe("recorder UI (Transport + Library)", () => {
   });
 });
 
-describe("record shortcut (R)", () => {
+describe("record shortcut (Space)", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.mocked(invoke).mockClear();
@@ -318,18 +318,18 @@ describe("record shortcut (R)", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("toggles record/stop on R", () => {
+  it("toggles record/stop on Space", () => {
     render(<App />);
     expect(screen.getByLabelText("Record")).toBeDefined();
 
-    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
     expect(screen.getByLabelText("Stop recording")).toBeDefined();
 
-    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
     expect(screen.getByLabelText("Record")).toBeDefined();
   });
 
-  it("ignores R while typing in a field (so rename can contain 'r')", () => {
+  it("ignores Space while typing in a field (so a song/take name can contain spaces)", () => {
     saveRecordings([
       { id: "r1", name: "Composition 1", createdAt: 0, durationMs: 1000, events: [] },
     ]);
@@ -338,7 +338,7 @@ describe("record shortcut (R)", () => {
     const input = screen.getByLabelText("New name") as HTMLInputElement;
     input.focus();
 
-    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
     expect(screen.queryByLabelText("Stop recording")).toBeNull(); // did NOT start recording
   });
 });

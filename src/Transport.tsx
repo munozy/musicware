@@ -28,14 +28,14 @@ function Transport({
         className={`rec-btn${isRecording ? " armed" : ""}`}
         aria-pressed={isRecording}
         aria-label={isRecording ? "Stop recording" : "Record"}
-        title={isRecording ? "Stop recording (R)" : "Record (R)"}
+        title={isRecording ? "Stop recording (Space)" : "Record (Space)"}
         onClick={isRecording ? onStop : onStart}
       >
         <span className="rec-dot" aria-hidden="true" />
         {isRecording ? `Stop · ${formatDuration(elapsedMs)}` : "Record"}
       </button>
       <span className="rec-shortcut" aria-hidden="true">
-        <kbd>R</kbd>
+        <kbd>Space</kbd>
       </span>
       <span className="rec-status" aria-live="polite">
         {isRecording ? "Recording — play the keyboard" : `${savedCount} saved`}
