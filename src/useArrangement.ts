@@ -25,9 +25,10 @@ import {
   setClipLoopCount as setClipLoopCountStore,
   setClipTranspose as setClipTransposeStore,
   setClipTrim as setClipTrimStore,
+  setClipEffect as setClipEffectStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
-import { isVoice, type Recording } from "./recordings";
+import { isVoice, type Recording, type VoiceEffect } from "./recordings";
 
 /**
  * State hook for the Song arrangement — mirrors useRecorder shape.
@@ -142,6 +143,9 @@ export function useArrangement() {
     },
     [],
   );
+  const setClipEffect = useCallback((clipId: string, effect: VoiceEffect) => {
+    setArrangement((prev) => setClipEffectStore(prev, clipId, effect));
+  }, []);
 
   /** Stop any in-progress recording preview and release its notes / voice audio. */
   const stopPreview = useCallback(() => {
@@ -357,6 +361,7 @@ export function useArrangement() {
     setClipLoop,
     transposeClip,
     trimClip,
+    setClipEffect,
     previewRecording,
     stopPreview,
     play,

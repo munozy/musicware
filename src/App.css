@@ -1493,6 +1493,19 @@ kbd {
 .clip-badge-transpose {
   background: rgba(31, 168, 160, 0.75);
 }
+.clip-badge-effect {
+  background: rgba(176, 124, 255, 0.8);
+}
+.clip-effect-select {
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  font-size: 9px;
+  padding: 1px 2px;
+  max-width: 92px;
+  cursor: pointer;
+}
 .timeline-clip:hover .timeline-clip-badges,
 .timeline-clip:focus-within .timeline-clip-badges {
   opacity: 0;

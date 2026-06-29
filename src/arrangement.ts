@@ -30,6 +30,9 @@ export type ClipInstance = {
   trimEndMs?: number | null;
   /** Per-clip mute — a muted clip is skipped by the scheduler (independent of track mute). */
   muted?: boolean;
+  /** VOICE clips only: per-instance effect override. Falls back to the take's effect when
+   * unset, so the same voice take can sound different in different spots (ADR-0009). */
+  effect?: VoiceEffect;
 };
 
 export type Track = {
@@ -253,7 +256,7 @@ export function voiceClipPlays(
       plays.push({
         recordingId: rec.id,
         blobKey: rec.audio.blobKey,
-        effect: rec.audio.effect,
+        effect: clip.effect ?? rec.audio.effect, // per-clip override wins; else the take's effect
         startMs: Math.max(0, clip.startMs),
         loopCount: Math.max(1, Math.floor(clip.loopCount || 1)),
         durationMs: Math.max(0, rec.durationMs),

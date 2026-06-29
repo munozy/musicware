@@ -5,7 +5,7 @@
  */
 
 import type { Arrangement, Track, ClipInstance } from "./arrangement";
-import { newId } from "./recordings";
+import { newId, type VoiceEffect } from "./recordings";
 
 const STORAGE_KEY = "musicware.arrangements.v1";
 
@@ -160,6 +160,11 @@ export function setClipLoopCount(arr: Arrangement, clipId: string, count: number
 export function setClipTranspose(arr: Arrangement, clipId: string, semitones: number): Arrangement {
   const t = Math.max(-MAX_TRANSPOSE, Math.min(MAX_TRANSPOSE, Math.trunc(Number.isFinite(semitones) ? semitones : 0)));
   return mapMatchingClip(arr, clipId, (c) => ({ ...c, transpose: t }));
+}
+
+/** Set a VOICE clip's per-instance effect override (ADR-0009). Unknown clipId → unchanged. */
+export function setClipEffect(arr: Arrangement, clipId: string, effect: VoiceEffect): Arrangement {
+  return mapMatchingClip(arr, clipId, (c) => ({ ...c, effect }));
 }
 
 /**

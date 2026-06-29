@@ -5,18 +5,7 @@
  */
 
 import { useState } from "react";
-import { formatDuration, type Recording, type VoiceEffect } from "./recordings";
-
-const EFFECTS: { value: VoiceEffect; label: string }[] = [
-  { value: "none", label: "🎙️ Normal" },
-  { value: "distortion", label: "🤘 Distortion" },
-  { value: "chipmunk", label: "🐿️ Chipmunk" },
-  { value: "monster", label: "👹 Monster" },
-  { value: "robot", label: "🤖 Robot" },
-  { value: "echo", label: "🔊 Echo" },
-  { value: "telephone", label: "📞 Telephone" },
-  { value: "reverb", label: "🏛️ Reverb" },
-];
+import { formatDuration, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
 
 type Props = {
   voiceTakes: Recording[];
@@ -170,7 +159,7 @@ function VoiceRow({
           onPreview(rec, next); // hear it immediately
         }}
       >
-        {EFFECTS.map((eff) => (
+        {VOICE_EFFECTS.map((eff) => (
           <option key={eff.value} value={eff.value}>
             {eff.label}
           </option>
