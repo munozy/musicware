@@ -7,8 +7,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 
 import { useArrangement } from "./useArrangement";
-import { loadArrangement, newArrangement, saveArrangement } from "./arrangementStore";
+import { newArrangement, saveArrangement } from "./arrangementStore";
+import { loadSongs } from "./songsStore";
 import type { Recording } from "./recordings";
+
+// Persistence now lives in the song library; read back the active song to assert it.
+const readActiveSong = () => {
+  const { songs, activeId } = loadSongs();
+  return songs.find((s) => s.id === activeId) ?? songs[0];
+};
 
 // A minimal recording with one note on/off.
 const makeRec = (id: string, startNote = 60): Recording => ({
@@ -49,7 +56,7 @@ describe("useArrangement — placeClip + persistence", () => {
     expect(result.current.arrangement.tracks[0].clips[0].startMs).toBe(1000);
 
     // Verify persistence — load from localStorage
-    const persisted = loadArrangement();
+    const persisted = readActiveSong();
     expect(persisted.tracks[0].clips).toHaveLength(1);
     expect(persisted.tracks[0].clips[0].recordingId).toBe("rec-1");
   });
@@ -73,7 +80,7 @@ describe("useArrangement — placeClip + persistence", () => {
     act(() => result.current.moveClip(clipId, 3000));
 
     expect(result.current.arrangement.tracks[0].clips[0].startMs).toBe(3000);
-    expect(loadArrangement().tracks[0].clips[0].startMs).toBe(3000);
+    expect(readActiveSong().tracks[0].clips[0].startMs).toBe(3000);
   });
 });
 
@@ -213,12 +220,60 @@ describe("useArrangement — track management", () => {
 
     act(() => result.current.addTrack());
     expect(result.current.arrangement.tracks).toHaveLength(initial + 1);
-    expect(loadArrangement().tracks).toHaveLength(initial + 1);
+    expect(readActiveSong().tracks).toHaveLength(initial + 1);
 
     const lastId = result.current.arrangement.tracks[initial].id;
     act(() => result.current.removeTrack(lastId));
     expect(result.current.arrangement.tracks).toHaveLength(initial);
-    expect(loadArrangement().tracks).toHaveLength(initial);
+    expect(readActiveSong().tracks).toHaveLength(initial);
+  });
+});
+
+describe("useArrangement — song library CRUD", () => {
+  it("starts with one song and creates more, switching to the new one", () => {
+    const { result } = renderHook(() => useArrangement());
+    expect(result.current.songs).toHaveLength(1);
+    const first = result.current.activeSongId;
+
+    act(() => result.current.newSong());
+    expect(result.current.songs).toHaveLength(2);
+    expect(result.current.activeSongId).not.toBe(first); // switched to the new song
+    expect(result.current.arrangement.tracks[0].clips).toHaveLength(0); // a fresh, empty song
+  });
+
+  it("edits the active song independently of the others", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 0)); // edit song 1
+    act(() => result.current.newSong()); // song 2 (now active)
+    expect(result.current.arrangement.tracks[0].clips).toHaveLength(0); // song 2 untouched
+
+    const songOne = result.current.songs[0].id;
+    act(() => result.current.selectSong(songOne));
+    expect(result.current.arrangement.tracks[0].clips).toHaveLength(1); // song 1 kept its clip
+  });
+
+  it("renames the active song and persists it", () => {
+    const { result } = renderHook(() => useArrangement());
+    const id = result.current.activeSongId;
+    act(() => result.current.renameSong(id, "  Chiptune  "));
+    expect(result.current.arrangement.name).toBe("Chiptune");
+    expect(readActiveSong().name).toBe("Chiptune");
+  });
+
+  it("deletes a song (picking a survivor) but refuses to delete the last one", () => {
+    const { result } = renderHook(() => useArrangement());
+    act(() => result.current.newSong());
+    expect(result.current.songs).toHaveLength(2);
+    const activeId = result.current.activeSongId;
+
+    act(() => result.current.deleteSong(activeId));
+    expect(result.current.songs).toHaveLength(1);
+    expect(result.current.songs.some((s) => s.id === activeId)).toBe(false);
+    expect(result.current.activeSongId).toBe(result.current.songs[0].id); // fell back to survivor
+
+    act(() => result.current.deleteSong(result.current.activeSongId));
+    expect(result.current.songs).toHaveLength(1); // refuses to remove the last song
   });
 });
 
@@ -287,7 +342,7 @@ describe("useArrangement — clip editing (Slice 5)", () => {
     expect(clips[1].recordingId).toBe("r1");
     expect(clips[1].startMs).toBe(2000);
     expect(clips[1].id).not.toBe(clipId);
-    expect(loadArrangement().tracks[0].clips).toHaveLength(2); // persisted
+    expect(readActiveSong().tracks[0].clips).toHaveLength(2); // persisted
   });
 
   it("setClipLoop and transposeClip update the clip and persist", () => {
@@ -301,7 +356,7 @@ describe("useArrangement — clip editing (Slice 5)", () => {
     const clip = result.current.arrangement.tracks[0].clips[0];
     expect(clip.loopCount).toBe(3);
     expect(clip.transpose).toBe(-4);
-    const persisted = loadArrangement().tracks[0].clips[0];
+    const persisted = readActiveSong().tracks[0].clips[0];
     expect(persisted.loopCount).toBe(3);
     expect(persisted.transpose).toBe(-4);
   });
@@ -316,6 +371,6 @@ describe("useArrangement — clip editing (Slice 5)", () => {
     const clip = result.current.arrangement.tracks[0].clips[0];
     expect(clip.trimStartMs).toBe(200);
     expect(clip.startMs).toBe(1200);
-    expect(loadArrangement().tracks[0].clips[0].trimStartMs).toBe(200);
+    expect(readActiveSong().tracks[0].clips[0].trimStartMs).toBe(200);
   });
 });
