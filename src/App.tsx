@@ -1,4 +1,5 @@
 import "./App.css";
+import appIcon from "../src-tauri/icons/128x128.png";
 import { useEffect, useRef, useState } from "react";
 import Keyboard from "./Keyboard";
 import PresetSelector from "./PresetSelector";
@@ -53,21 +54,7 @@ function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <svg className="brand-logo" viewBox="0 0 32 32" role="img" aria-label="musicware logo">
-            <defs>
-              <linearGradient id="brandLogoGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stopColor="#6ad7ff" />
-                <stop offset="1" stopColor="#b07cff" />
-              </linearGradient>
-            </defs>
-            <rect x="2" y="2" width="28" height="28" rx="9" fill="url(#brandLogoGrad)" />
-            {/* equalizer bars — reads as music; dark on the bright gradient */}
-            <g fill="#0c0e13">
-              <rect x="8.5" y="13" width="3" height="6" rx="1.5" />
-              <rect x="14.5" y="9" width="3" height="14" rx="1.5" />
-              <rect x="20.5" y="11.5" width="3" height="9" rx="1.5" />
-            </g>
-          </svg>
+          <img className="brand-logo" src={appIcon} alt="musicware logo" width={32} height={32} />
           <span className="brand-text">
             <span className="brand-name">musicware</span>
             <span className="brand-by">
