@@ -903,6 +903,84 @@ fn apply_master_volume(out: &mut [f32], gain: f32) {
     }
 }
 
+/// A timestamped event for the OFFLINE arrangement render (song export). Mirrors the
+/// frontend's flattened symbolic stream: note on/off + preset, in sample positions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeqEvent {
+    On { note: u8 },
+    Off { note: u8 },
+    Preset { index: u8 },
+}
+
+/// The master level the export bakes in (independent of the live volume slider) — matches
+/// the live default gain staging (apply_master_volume with VOLUME_GAIN_MAX).
+const EXPORT_LEVEL: f32 = 0.8;
+
+/// Render a song's symbolic stream OFFLINE to a mono f32 buffer (song export). NOT the
+/// real-time path — runs synchronously off the audio thread, so allocation is fine and the
+/// assert_no_alloc guard does not apply. Reuses the exact engine DSP (render_block /
+/// apply_event / the per-preset ADSR table) so the export sounds like live playback, with
+/// the same per-voice timbre capture (ADR-0008: a note keeps the preset active when it
+/// started). `events` are (sample_offset, event) pairs; they are sorted here with a STABLE
+/// sort so a preset stamped at the same sample as its note still lands first.
+pub fn render_offline(
+    events: &[(usize, SeqEvent)],
+    total_samples: usize,
+    sample_rate: f32,
+) -> Vec<f32> {
+    let mut pool = VoicePool::new();
+    let adsr_table = build_adsr_table(sample_rate);
+    let mut current_preset: u8 = 0;
+    let mut out = vec![0.0f32; total_samples];
+
+    let mut sorted: Vec<(usize, SeqEvent)> = events.to_vec();
+    sorted.sort_by_key(|&(at, _)| at); // stable — preserves preset-before-note at a shared sample
+
+    let mut cursor = 0usize;
+    for &(at, ev) in &sorted {
+        let at = at.min(total_samples);
+        if at > cursor {
+            render_block(
+                &mut out[cursor..at],
+                &mut pool.voices,
+                1,
+                AMPLITUDE,
+                &adsr_table,
+            );
+            cursor = at;
+        }
+        match ev {
+            SeqEvent::On { note } => apply_event(
+                &mut pool,
+                NoteEvent::NoteOn { note },
+                sample_rate,
+                current_preset,
+            ),
+            SeqEvent::Off { note } => apply_event(
+                &mut pool,
+                NoteEvent::NoteOff { note },
+                sample_rate,
+                current_preset,
+            ),
+            SeqEvent::Preset { index } => {
+                current_preset = (index as usize).min(PRESET_COUNT - 1) as u8
+            }
+        }
+    }
+    if cursor < total_samples {
+        render_block(
+            &mut out[cursor..total_samples],
+            &mut pool.voices,
+            1,
+            AMPLITUDE,
+            &adsr_table,
+        );
+    }
+
+    apply_master_volume(&mut out, EXPORT_LEVEL * VOLUME_GAIN_MAX);
+    out
+}
+
 /// Push a note event onto the producer, or drop it and count the drop if the
 /// queue is full.  Never blocks, spins, or allocates — safe even though it runs
 /// on the (non-real-time) control thread.
@@ -2530,5 +2608,49 @@ mod tests {
             organ_env > 0.7,
             "organ voice should sustain near 0.85, env={organ_env}"
         );
+    }
+
+    #[test]
+    fn render_offline_is_silent_with_no_events_and_sounds_with_a_note() {
+        let sr = 44_100.0;
+        let total = 22_050; // 0.5 s
+
+        // No events → pure silence.
+        let silent = render_offline(&[], total, sr);
+        assert_eq!(silent.len(), total);
+        assert!(
+            silent.iter().all(|&s| s == 0.0),
+            "no events must render silence"
+        );
+
+        // A held note (preset 0/Sine, on at 0, off near the end) → audible, bounded output.
+        let events = [
+            (0usize, SeqEvent::Preset { index: 0 }),
+            (0usize, SeqEvent::On { note: 69 }), // A4
+            (20_000usize, SeqEvent::Off { note: 69 }),
+        ];
+        let pcm = render_offline(&events, total, sr);
+        assert_eq!(pcm.len(), total);
+        assert!(
+            pcm.iter().all(|&s| (-1.0..=1.0).contains(&s)),
+            "export stays within [-1,1]"
+        );
+        let peak = pcm.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+        assert!(
+            peak > 0.05,
+            "a sounding note should produce audible output, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn render_offline_clamps_event_times_past_the_end() {
+        // Events beyond total_samples must not panic (slice bounds) — they clamp to the end.
+        let sr = 44_100.0;
+        let events = [
+            (0usize, SeqEvent::On { note: 60 }),
+            (999_999usize, SeqEvent::Off { note: 60 }),
+        ];
+        let pcm = render_offline(&events, 4_410, sr);
+        assert_eq!(pcm.len(), 4_410);
     }
 }
