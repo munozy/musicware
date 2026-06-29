@@ -117,19 +117,46 @@ kbd {
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: 0.2px;
+  gap: 0.6rem;
   min-width: 200px;
 }
 
-.brand-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+.brand-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 12px rgba(124, 92, 255, 0.4));
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.02;
+}
+
+.brand-name {
+  /* Geometric display fonts available on macOS (the app's platform); Inter/system fallback. */
+  font-family: "Avenir Next", "Futura", Inter, system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 1.22rem;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.brand-by {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.brand-moon {
   background: linear-gradient(135deg, var(--accent-2), var(--accent-3));
-  box-shadow: 0 0 14px var(--accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
 }
 
 /* Pin the recorder + volume group to the right corner — in every mode, whether or not
