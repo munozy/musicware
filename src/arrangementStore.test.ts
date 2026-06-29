@@ -20,6 +20,13 @@ import {
   setClipTrim,
   setClipEffect,
   MAX_TRANSPOSE,
+  addSection,
+  renameSection,
+  moveSection,
+  resizeSection,
+  removeSection,
+  applyTemplate,
+  SECTION_TEMPLATES,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -393,5 +400,56 @@ describe("clip editing — duplicate / loop / transpose (Slice 5)", () => {
       expect(arr.tracks[0].clips[0].effect).toBeUndefined(); // original untouched
       expect(setClipEffect(arr, "nope", "echo")).toBe(arr);
     });
+  });
+});
+
+describe("song structure — sections + templates (Slice 6)", () => {
+  it("addSection appends an auto-named, coloured section (start/end clamped); immutable", () => {
+    const arr = newArrangement();
+    const next = addSection(arr, -100, 4000);
+    expect(arr.sections).toEqual([]); // original untouched
+    expect(next.sections).toHaveLength(1);
+    expect(next.sections[0]).toMatchObject({ name: "Section 1", startMs: 0, endMs: 4000 });
+    expect(typeof next.sections[0].color).toBe("string");
+    expect(addSection(next, 5000, 6000).sections[1].name).toBe("Section 2");
+  });
+
+  it("renameSection trims; ignores blank + unknown id", () => {
+    const a = addSection(newArrangement(), 0, 4000);
+    const id = a.sections[0].id;
+    expect(renameSection(a, id, "  Chorus ").sections[0].name).toBe("Chorus");
+    expect(renameSection(a, id, "  ")).toBe(a);
+    expect(renameSection(a, "nope", "X")).toBe(a);
+  });
+
+  it("moveSection shifts the start (clamped >= 0), preserving length", () => {
+    const a = addSection(newArrangement(), 1000, 3000); // length 2000
+    const id = a.sections[0].id;
+    const moved = moveSection(a, id, 5000).sections[0];
+    expect(moved).toMatchObject({ startMs: 5000, endMs: 7000 });
+    expect(moveSection(a, id, -500).sections[0]).toMatchObject({ startMs: 0, endMs: 2000 });
+  });
+
+  it("resizeSection sets the end (kept past the start); removeSection drops it", () => {
+    const a = addSection(newArrangement(), 1000, 3000);
+    const id = a.sections[0].id;
+    expect(resizeSection(a, id, 6000).sections[0].endMs).toBe(6000);
+    expect(resizeSection(a, id, 500).sections[0].endMs).toBeGreaterThan(1000); // can't cross the start
+    expect(removeSection(a, id).sections).toEqual([]);
+  });
+
+  it("applyTemplate lays the genre parts contiguously across totalMs; unknown key → unchanged", () => {
+    const a = addSection(newArrangement(), 0, 4000); // pre-existing section is replaced
+    const out = applyTemplate(a, "electronic", 10_000);
+    const parts = SECTION_TEMPLATES.electronic.parts;
+    expect(out.sections).toHaveLength(parts.length);
+    expect(out.sections[0].name).toBe("Intro");
+    expect(out.sections[0].startMs).toBe(0);
+    expect(out.sections[out.sections.length - 1].endMs).toBe(10_000); // last absorbs rounding → exactly fills
+    // contiguous: each section starts where the previous ended
+    for (let i = 1; i < out.sections.length; i++) {
+      expect(out.sections[i].startMs).toBe(out.sections[i - 1].endMs);
+    }
+    expect(applyTemplate(a, "nope", 10_000)).toBe(a);
   });
 });

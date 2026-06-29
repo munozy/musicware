@@ -58,6 +58,12 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     transposeClip,
     trimClip,
     setClipEffect,
+    addSection,
+    renameSection,
+    moveSection,
+    resizeSection,
+    removeSection,
+    applyTemplate,
     previewRecording,
     play,
     stop,
@@ -244,6 +250,14 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
             onRemoveTrack: removeTrack,
             onToggleMute: toggleMute,
             onToggleSolo: toggleSolo,
+          }}
+          sectionOps={{
+            onAddSection: addSection,
+            onRenameSection: renameSection,
+            onMoveSection: moveSection,
+            onResizeSection: resizeSection,
+            onRemoveSection: removeSection,
+            onApplyTemplate: applyTemplate,
           }}
         />
       </div>
