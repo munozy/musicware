@@ -305,4 +305,17 @@ describe("useArrangement — clip editing (Slice 5)", () => {
     expect(persisted.loopCount).toBe(3);
     expect(persisted.transpose).toBe(-4);
   });
+
+  it("trimClip sets the trim window (and an optional shifted startMs) and persists", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    act(() => result.current.placeClip(trackId, "r1", 1000));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+
+    act(() => result.current.trimClip(clipId, { trimStartMs: 200, startMs: 1200 }));
+    const clip = result.current.arrangement.tracks[0].clips[0];
+    expect(clip.trimStartMs).toBe(200);
+    expect(clip.startMs).toBe(1200);
+    expect(loadArrangement().tracks[0].clips[0].trimStartMs).toBe(200);
+  });
 });

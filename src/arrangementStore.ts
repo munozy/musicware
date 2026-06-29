@@ -162,6 +162,26 @@ export function setClipTranspose(arr: Arrangement, clipId: string, semitones: nu
   return mapMatchingClip(arr, clipId, (c) => ({ ...c, transpose: t }));
 }
 
+/**
+ * Set a clip's trim window (US-17), and optionally its startMs (a left-edge trim shifts the
+ * block so the kept content stays put). Each provided field is rounded and clamped >= 0; the
+ * CALLER owns duration-aware bounds (it has the recording length) and the min-window guard.
+ * Unknown clipId → unchanged.
+ */
+export function setClipTrim(
+  arr: Arrangement,
+  clipId: string,
+  patch: { startMs?: number; trimStartMs?: number; trimEndMs?: number },
+): Arrangement {
+  const round0 = (n: number) => Math.max(0, Math.round(n));
+  return mapMatchingClip(arr, clipId, (c) => ({
+    ...c,
+    ...(patch.startMs != null ? { startMs: round0(patch.startMs) } : {}),
+    ...(patch.trimStartMs != null ? { trimStartMs: round0(patch.trimStartMs) } : {}),
+    ...(patch.trimEndMs != null ? { trimEndMs: round0(patch.trimEndMs) } : {}),
+  }));
+}
+
 // ---- Track management (Slice 3, US-3/4/5/6/10) — all pure/immutable, unknown-id safe ----
 
 /** Append a new empty track (next palette colour, next number). */

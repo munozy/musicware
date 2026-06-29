@@ -17,6 +17,7 @@ import {
   duplicateClip,
   setClipLoopCount,
   setClipTranspose,
+  setClipTrim,
   MAX_TRANSPOSE,
 } from "./arrangementStore";
 
@@ -350,6 +351,37 @@ describe("clip editing — duplicate / loop / transpose (Slice 5)", () => {
       setClipTranspose(arr, clipId, 5);
       expect(arr.tracks[0].clips[0].transpose).toBe(0);
       expect(setClipTranspose(arr, "nope", 5)).toBe(arr);
+    });
+  });
+
+  describe("setClipTrim", () => {
+    it("sets trimEndMs (right-edge trim) leaving startMs untouched", () => {
+      const { arr, clipId } = seed(); // startMs 1000
+      const c = setClipTrim(arr, clipId, { trimEndMs: 1800 }).tracks[0].clips[0];
+      expect(c.trimEndMs).toBe(1800);
+      expect(c.startMs).toBe(1000);
+    });
+
+    it("sets trimStartMs AND a shifted startMs together (left-edge trim keeps content in place)", () => {
+      const { arr, clipId } = seed(); // startMs 1000
+      const c = setClipTrim(arr, clipId, { trimStartMs: 300, startMs: 1300 }).tracks[0].clips[0];
+      expect(c.trimStartMs).toBe(300);
+      expect(c.startMs).toBe(1300);
+    });
+
+    it("rounds and clamps each provided field to >= 0; only patches the fields given", () => {
+      const { arr, clipId } = seed();
+      const c = setClipTrim(arr, clipId, { trimStartMs: -50, trimEndMs: 1499.6 }).tracks[0].clips[0];
+      expect(c.trimStartMs).toBe(0);
+      expect(c.trimEndMs).toBe(1500);
+      expect(c.transpose).toBe(0); // untouched
+    });
+
+    it("is immutable; unknown id → unchanged (same ref)", () => {
+      const { arr, clipId } = seed();
+      setClipTrim(arr, clipId, { trimEndMs: 1000 });
+      expect(arr.tracks[0].clips[0].trimEndMs).toBeUndefined();
+      expect(setClipTrim(arr, "nope", { trimEndMs: 1000 })).toBe(arr);
     });
   });
 });

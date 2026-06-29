@@ -1485,3 +1485,36 @@ kbd {
   min-width: 16px;
   text-align: center;
 }
+
+/* Trim handles — drag a clip edge to shorten the brick (Slice 5). */
+.timeline-clip-trim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.1s;
+  background: rgba(255, 255, 255, 0.35);
+}
+.timeline-clip-trim-start {
+  left: 0;
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+.timeline-clip-trim-end {
+  right: 0;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+.timeline-clip:hover .timeline-clip-trim,
+.timeline-clip:focus-within .timeline-clip-trim {
+  opacity: 0.55;
+}
+.timeline-clip-trim:hover {
+  opacity: 0.9 !important;
+}
+.timeline-clip.trimming {
+  outline: 1px solid var(--accent-2);
+}

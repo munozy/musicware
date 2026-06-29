@@ -13,8 +13,8 @@
  * SNAP_MS = 100 keeps things usable; the full bar/beat grid is Slice 7.
  */
 
-import { useRef } from "react";
-import { clipPlayedMs, type Arrangement, type ClipInstance } from "./arrangement";
+import { useRef, useState } from "react";
+import { clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
 import type { Recording } from "./recordings";
 import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
@@ -55,7 +55,10 @@ type ClipOps = {
   onDuplicateClip: (clipId: string, atMs: number) => void;
   onSetClipLoop: (clipId: string, count: number) => void;
   onTransposeClip: (clipId: string, semitones: number) => void;
+  onTrimClip: (clipId: string, patch: { startMs?: number; trimStartMs?: number; trimEndMs?: number }) => void;
 };
+
+const MIN_WINDOW_MS = 100; // a trimmed brick can't be shorter than one snap step
 
 function ClipBlock({
   clip,
@@ -66,6 +69,7 @@ function ClipBlock({
   onDuplicateClip,
   onSetClipLoop,
   onTransposeClip,
+  onTrimClip,
 }: { clip: ClipInstance; recordings: Recording[] } & ClipOps) {
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
@@ -81,10 +85,45 @@ function ClipBlock({
   // the store stays recording-agnostic per ADR-0007).
   const dupAtMs = clip.startMs + (rec ? playedMs : SNAP_MS);
 
+  const clipElRef = useRef<HTMLDivElement>(null);
+  const [trimming, setTrimming] = useState(false);
+
   const handleDragStart = (e: React.DragEvent) => {
     const grabOffsetPx = e.clientX - e.currentTarget.getBoundingClientRect().left;
     e.dataTransfer.setData("text/plain", `move:${clip.id}:${Math.max(0, grabOffsetPx)}`);
     e.dataTransfer.effectAllowed = "move";
+  };
+
+  // Drag a clip edge to trim. Right edge sets trimEndMs; left edge sets trimStartMs AND shifts
+  // startMs so the kept audio stays put (standard DAW behaviour). The recording's real length
+  // bounds it here (the store stays duration-agnostic). While trimming we disable the clip's
+  // HTML5 move-drag (state + an imperative guard for the gap before the re-render lands).
+  const beginTrim = (edge: "start" | "end") => (e: React.PointerEvent) => {
+    if (!rec) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clipElRef.current?.setAttribute("draggable", "false");
+    setTrimming(true);
+    const startX = e.clientX;
+    const { ws: origWs, we: origWe } = clipWindow(clip, rec.durationMs);
+    const origStartMs = clip.startMs;
+    const onMove = (ev: PointerEvent) => {
+      const deltaMs = pxToMs(ev.clientX - startX, PX_PER_MS);
+      if (edge === "end") {
+        const newWe = Math.min(rec.durationMs, Math.max(origWs + MIN_WINDOW_MS, snapMs(origWe + deltaMs, SNAP_MS)));
+        onTrimClip(clip.id, { trimEndMs: newWe });
+      } else {
+        const newWs = Math.max(0, Math.min(origWe - MIN_WINDOW_MS, snapMs(origWs + deltaMs, SNAP_MS)));
+        onTrimClip(clip.id, { trimStartMs: newWs, startMs: Math.max(0, origStartMs + (newWs - origWs)) });
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setTrimming(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -126,16 +165,30 @@ function ClipBlock({
 
   return (
     <div
-      className={`timeline-clip${clip.muted ? " muted" : ""}`}
+      ref={clipElRef}
+      className={`timeline-clip${clip.muted ? " muted" : ""}${trimming ? " trimming" : ""}`}
       style={{ left: leftPx, width: widthPx }}
-      title={`${name} — drag to move · D duplicate · ↑↓ transpose · [ ] loop · M mute · Del remove`}
-      draggable
+      title={`${name} — drag to move · drag edges to trim · D duplicate · ↑↓ transpose · [ ] loop · M mute · Del remove`}
+      draggable={!trimming}
       onDragStart={handleDragStart}
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds${loops > 1 ? `, looped ${loops} times` : ""}${transpose !== 0 ? `, transposed ${fmtTranspose(transpose)} semitones` : ""}${clip.muted ? ", muted" : ""}. Drag or Left/Right to move; Up/Down to transpose; [ and ] to loop; D to duplicate; M to mute; Delete to remove.`}
+      aria-label={`${name} clip at ${(clip.startMs / 1000).toFixed(1)} seconds${loops > 1 ? `, looped ${loops} times` : ""}${transpose !== 0 ? `, transposed ${fmtTranspose(transpose)} semitones` : ""}${clip.muted ? ", muted" : ""}. Drag or Left/Right to move; Up/Down to transpose; [ and ] to loop; D to duplicate; M to mute; Delete to remove. Drag the left/right edges to trim.`}
     >
+      <span
+        className="timeline-clip-trim timeline-clip-trim-start"
+        aria-hidden="true"
+        onPointerDown={beginTrim("start")}
+        onDragStart={(e) => e.preventDefault()}
+      />
+      <span
+        className="timeline-clip-trim timeline-clip-trim-end"
+        aria-hidden="true"
+        onPointerDown={beginTrim("end")}
+        onDragStart={(e) => e.preventDefault()}
+      />
+
       <span className="timeline-clip-label">{name}</span>
 
       {(loops > 1 || transpose !== 0) && (

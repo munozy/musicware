@@ -49,6 +49,8 @@ describe("Timeline", () => {
   let onSetClipLoop: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onTransposeClip: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onTrimClip: any;
   let trackOps: TrackOps;
 
   beforeEach(() => {
@@ -60,6 +62,7 @@ describe("Timeline", () => {
     onDuplicateClip = vi.fn();
     onSetClipLoop = vi.fn();
     onTransposeClip = vi.fn();
+    onTrimClip = vi.fn();
     trackOps = {
       onAddTrack,
       onRenameTrack: vi.fn(),
@@ -79,7 +82,7 @@ describe("Timeline", () => {
         isPlaying={false}
         playStartedAt={null}
         onPlaceClip={onPlaceClip}
-        clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip }}
+        clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip, onTrimClip }}
         trackOps={trackOps}
       />,
     );
@@ -252,6 +255,13 @@ describe("Timeline", () => {
     const w2 = (c2.querySelector(".timeline-clip") as HTMLElement).style.width;
     expect(w1).toBe("80px"); // 2000ms × 0.04 px/ms
     expect(w2).toBe("160px"); // 4000ms × 0.04 px/ms
+  });
+
+  it("renders left and right trim handles on a clip", () => {
+    const { arr } = withClip(0);
+    const { container } = renderTL(arr, [makeRec("r1")]);
+    expect(container.querySelector(".timeline-clip-trim-start")).not.toBeNull();
+    expect(container.querySelector(".timeline-clip-trim-end")).not.toBeNull();
   });
 
   it("shows ×N and transpose badges only when non-default", () => {

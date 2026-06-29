@@ -25,6 +25,7 @@ import {
   duplicateClip as duplicateClipStore,
   setClipLoopCount as setClipLoopCountStore,
   setClipTranspose as setClipTransposeStore,
+  setClipTrim as setClipTrimStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import { isVoice, type Recording } from "./recordings";
@@ -117,6 +118,12 @@ export function useArrangement() {
   const transposeClip = useCallback((clipId: string, semitones: number) => {
     setArrangement((prev) => setClipTransposeStore(prev, clipId, semitones));
   }, []);
+  const trimClip = useCallback(
+    (clipId: string, patch: { startMs?: number; trimStartMs?: number; trimEndMs?: number }) => {
+      setArrangement((prev) => setClipTrimStore(prev, clipId, patch));
+    },
+    [],
+  );
 
   /** Stop any in-progress recording preview and release its notes / voice audio. */
   const stopPreview = useCallback(() => {
@@ -280,6 +287,7 @@ export function useArrangement() {
     duplicateClip,
     setClipLoop,
     transposeClip,
+    trimClip,
     previewRecording,
     stopPreview,
     play,
