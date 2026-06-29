@@ -934,7 +934,7 @@ pub fn render_offline(
     let mut out = vec![0.0f32; total_samples];
 
     let mut sorted: Vec<(usize, SeqEvent)> = events.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0)); // stable — preserves preset-before-note at a shared sample
+    sorted.sort_by_key(|&(at, _)| at); // stable — preserves preset-before-note at a shared sample
 
     let mut cursor = 0usize;
     for &(at, ev) in &sorted {
