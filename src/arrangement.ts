@@ -102,6 +102,24 @@ export function clipPlayedMs(
   return clipWindow(clip, durationMs).windowLen * loops;
 }
 
+/** The end time of the latest-finishing clip (ms) — the arrangement's content length; 0 if empty.
+ * Used to size song-structure templates (Slice 6) to the actual material. */
+export function arrangementContentMs(
+  arr: Arrangement,
+  recordings: Recording[] | Map<string, Recording>,
+): number {
+  const byId = toMap(recordings);
+  let end = 0;
+  for (const track of arr.tracks) {
+    for (const clip of track.clips) {
+      const rec = byId.get(clip.recordingId);
+      if (!rec) continue;
+      end = Math.max(end, Math.max(0, clip.startMs) + clipPlayedMs(clip, rec.durationMs));
+    }
+  }
+  return end;
+}
+
 /**
  * Expand a single clip instance into absolute-timed events. Pure; never throws on a
  * dangling/degenerate clip (returns []). Each loop iteration force-closes notes still

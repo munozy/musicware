@@ -26,6 +26,12 @@ import {
   setClipTranspose as setClipTransposeStore,
   setClipTrim as setClipTrimStore,
   setClipEffect as setClipEffectStore,
+  addSection as addSectionStore,
+  renameSection as renameSectionStore,
+  moveSection as moveSectionStore,
+  resizeSection as resizeSectionStore,
+  removeSection as removeSectionStore,
+  applyTemplate as applyTemplateStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
 import { isVoice, type Recording, type VoiceEffect } from "./recordings";
@@ -145,6 +151,26 @@ export function useArrangement() {
   );
   const setClipEffect = useCallback((clipId: string, effect: VoiceEffect) => {
     setArrangement((prev) => setClipEffectStore(prev, clipId, effect));
+  }, []);
+
+  /** Song structure — section markers + genre templates (Slice 6). Visual-only. */
+  const addSection = useCallback((startMs: number, endMs: number) => {
+    setArrangement((prev) => addSectionStore(prev, startMs, endMs));
+  }, []);
+  const renameSection = useCallback((id: string, name: string) => {
+    setArrangement((prev) => renameSectionStore(prev, id, name));
+  }, []);
+  const moveSection = useCallback((id: string, startMs: number) => {
+    setArrangement((prev) => moveSectionStore(prev, id, startMs));
+  }, []);
+  const resizeSection = useCallback((id: string, endMs: number) => {
+    setArrangement((prev) => resizeSectionStore(prev, id, endMs));
+  }, []);
+  const removeSection = useCallback((id: string) => {
+    setArrangement((prev) => removeSectionStore(prev, id));
+  }, []);
+  const applyTemplate = useCallback((key: string, totalMs: number) => {
+    setArrangement((prev) => applyTemplateStore(prev, key, totalMs));
   }, []);
 
   /** Stop any in-progress recording preview and release its notes / voice audio. */
@@ -374,6 +400,12 @@ export function useArrangement() {
     transposeClip,
     trimClip,
     setClipEffect,
+    addSection,
+    renameSection,
+    moveSection,
+    resizeSection,
+    removeSection,
+    applyTemplate,
     previewRecording,
     stopPreview,
     play,

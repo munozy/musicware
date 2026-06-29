@@ -4,7 +4,7 @@
  * All functions tolerate missing/corrupt storage by returning a fresh default.
  */
 
-import type { Arrangement, Track, ClipInstance } from "./arrangement";
+import type { Arrangement, Track, ClipInstance, Section } from "./arrangement";
 import { newId, type VoiceEffect } from "./recordings";
 
 const STORAGE_KEY = "musicware.arrangements.v1";
@@ -252,4 +252,120 @@ export function toggleTrackSoloed(arr: Arrangement, trackId: string): Arrangemen
 /** Toggle a single clip's mute (per-brick). flattenArrangement skips muted clips. Unknown id → unchanged. */
 export function toggleClipMuted(arr: Arrangement, clipId: string): Arrangement {
   return mapMatchingClip(arr, clipId, (c) => ({ ...c, muted: !c.muted }));
+}
+
+// ---- Song structure: section markers + genre templates (Slice 6, US-20/21) ----
+// Sections are VISUAL guides only — flattenArrangement never reads them (they don't gate playback).
+
+export const SECTION_PALETTE = ["#4f86f7", "#6ad7ff", "#e06a8b", "#b07cff", "#46c66d", "#f5a623"];
+const MIN_SECTION_MS = 500;
+
+/** Genre starting structures (the "blank-canvas cure"): ordered parts with relative weights. */
+export const SECTION_TEMPLATES: Record<string, { label: string; parts: { name: string; weight: number }[] }> = {
+  electronic: {
+    label: "Electronic",
+    parts: [
+      { name: "Intro", weight: 1 },
+      { name: "Build", weight: 1 },
+      { name: "Drop", weight: 2 },
+      { name: "Breakdown", weight: 1 },
+      { name: "Outro", weight: 1 },
+    ],
+  },
+  rock: {
+    label: "Rock",
+    parts: [
+      { name: "Intro", weight: 1 },
+      { name: "Verse", weight: 2 },
+      { name: "Chorus", weight: 2 },
+      { name: "Bridge", weight: 1 },
+      { name: "Outro", weight: 1 },
+    ],
+  },
+  cinematic: {
+    label: "Cinematic",
+    parts: [
+      { name: "Intro", weight: 1 },
+      { name: "Tension", weight: 2 },
+      { name: "Climax", weight: 2 },
+      { name: "Resolution", weight: 1 },
+    ],
+  },
+};
+
+function sectionsOf(arr: Arrangement): Section[] {
+  return arr.sections ?? [];
+}
+
+/** Append a section spanning [startMs, endMs] (auto-named/coloured). */
+export function addSection(arr: Arrangement, startMs: number, endMs: number): Arrangement {
+  const s0 = Math.max(0, Math.round(startMs));
+  const s1 = Math.max(s0 + MIN_SECTION_MS, Math.round(endMs));
+  const sections = sectionsOf(arr);
+  const section: Section = {
+    id: newId(),
+    name: `Section ${sections.length + 1}`,
+    startMs: s0,
+    endMs: s1,
+    color: SECTION_PALETTE[sections.length % SECTION_PALETTE.length],
+  };
+  return { ...arr, sections: [...sections, section] };
+}
+
+export function renameSection(arr: Arrangement, id: string, name: string): Arrangement {
+  const trimmed = name.trim();
+  if (!trimmed || !sectionsOf(arr).some((s) => s.id === id)) return arr;
+  return { ...arr, sections: sectionsOf(arr).map((s) => (s.id === id ? { ...s, name: trimmed } : s)) };
+}
+
+/** Move a section to start at `startMs` (clamped >= 0), preserving its length. */
+export function moveSection(arr: Arrangement, id: string, startMs: number): Arrangement {
+  const at = Math.max(0, Math.round(startMs));
+  if (!sectionsOf(arr).some((s) => s.id === id)) return arr;
+  return {
+    ...arr,
+    sections: sectionsOf(arr).map((s) => (s.id === id ? { ...s, startMs: at, endMs: at + (s.endMs - s.startMs) } : s)),
+  };
+}
+
+/** Set a section's end (drag the right edge); kept at least MIN_SECTION_MS past its start. */
+export function resizeSection(arr: Arrangement, id: string, endMs: number): Arrangement {
+  if (!sectionsOf(arr).some((s) => s.id === id)) return arr;
+  return {
+    ...arr,
+    sections: sectionsOf(arr).map((s) =>
+      s.id === id ? { ...s, endMs: Math.max(s.startMs + MIN_SECTION_MS, Math.round(endMs)) } : s,
+    ),
+  };
+}
+
+export function removeSection(arr: Arrangement, id: string): Arrangement {
+  if (!sectionsOf(arr).some((s) => s.id === id)) return arr;
+  return { ...arr, sections: sectionsOf(arr).filter((s) => s.id !== id) };
+}
+
+/**
+ * Replace the sections with a genre template, laid out contiguously from 0 across `totalMs`
+ * proportional to each part's weight. Unknown template key → unchanged.
+ */
+export function applyTemplate(arr: Arrangement, key: string, totalMs: number): Arrangement {
+  const tpl = SECTION_TEMPLATES[key];
+  if (!tpl) return arr;
+  const span = Math.max(MIN_SECTION_MS * tpl.parts.length, Math.round(totalMs));
+  const totalWeight = tpl.parts.reduce((n, p) => n + p.weight, 0);
+  let cursor = 0;
+  const sections: Section[] = tpl.parts.map((part, i) => {
+    const start = cursor;
+    // Last part absorbs rounding so the sections exactly fill the span.
+    const end = i === tpl.parts.length - 1 ? span : Math.round(start + (span * part.weight) / totalWeight);
+    cursor = end;
+    return {
+      id: newId(),
+      name: part.name,
+      startMs: start,
+      endMs: Math.max(start + MIN_SECTION_MS, end),
+      color: SECTION_PALETTE[i % SECTION_PALETTE.length],
+    };
+  });
+  return { ...arr, sections };
 }

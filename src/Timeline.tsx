@@ -14,10 +14,11 @@
  */
 
 import { useRef, useState } from "react";
-import { clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
+import { arrangementContentMs, clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
 import { isVoice, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
 import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
+import SectionBand, { type SectionOps } from "./SectionBand";
 import Playhead from "./Playhead";
 
 const SNAP_MS = 100;
@@ -46,6 +47,7 @@ type Props = {
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   clipOps: ClipOps;
   trackOps: TrackOps;
+  sectionOps: SectionOps;
 };
 
 type ClipOps = {
@@ -408,10 +410,16 @@ export default function Timeline({
   onPlaceClip,
   clipOps,
   trackOps,
+  sectionOps,
 }: Props) {
   return (
     <div className="timeline" role="region" aria-label="Timeline">
       <Ruler />
+      <SectionBand
+        sections={arrangement.sections}
+        contentMs={arrangementContentMs(arrangement, recordings)}
+        ops={sectionOps}
+      />
       <div className="timeline-tracks">
         {arrangement.tracks.map((track, i) => (
           <div key={track.id} className="timeline-track-row">

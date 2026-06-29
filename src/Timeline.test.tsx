@@ -97,6 +97,14 @@ describe("Timeline", () => {
         onPlaceClip={onPlaceClip}
         clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip, onTrimClip, onSetClipEffect }}
         trackOps={trackOps}
+        sectionOps={{
+          onAddSection: vi.fn(),
+          onRenameSection: vi.fn(),
+          onMoveSection: vi.fn(),
+          onResizeSection: vi.fn(),
+          onRemoveSection: vi.fn(),
+          onApplyTemplate: vi.fn(),
+        }}
       />,
     );
 
