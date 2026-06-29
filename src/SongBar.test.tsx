@@ -60,14 +60,21 @@ describe("SongBar", () => {
     expect((screen.getByRole("button", { name: /delete song/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("Export calls onExport; shows 'Exporting…' and is disabled while exporting", () => {
-    const { rerender } = render(<SongBar {...p} />);
+  it("Export calls onExport with the chosen format (defaults to mp3; switch to wav)", () => {
+    render(<SongBar {...p} />);
     fireEvent.click(screen.getByRole("button", { name: /export song/i }));
-    expect(p.onExport).toHaveBeenCalledOnce();
+    expect(p.onExport).toHaveBeenLastCalledWith("mp3"); // default
 
-    rerender(<SongBar {...p} exporting={true} />);
+    fireEvent.change(screen.getByRole("combobox", { name: /export format/i }), { target: { value: "wav" } });
+    fireEvent.click(screen.getByRole("button", { name: /export song/i }));
+    expect(p.onExport).toHaveBeenLastCalledWith("wav");
+  });
+
+  it("shows 'Exporting…' and disables the controls while exporting", () => {
+    render(<SongBar {...p} exporting={true} />);
     const btn = screen.getByRole("button", { name: /export song/i }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.textContent).toMatch(/exporting/i);
+    expect((screen.getByRole("combobox", { name: /export format/i }) as HTMLSelectElement).disabled).toBe(true);
   });
 });

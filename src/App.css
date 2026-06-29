@@ -1018,8 +1018,22 @@ kbd {
   font-size: 0.82rem;
   color: var(--text-dim);
 }
+.song-bar-export-group {
+  margin-left: auto; /* push the export controls to the right end of the bar */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.song-bar-format {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
 .song-bar-export {
-  margin-left: auto; /* push Export to the right end of the bar */
   font-weight: 700;
 }
 .song-bar-export:hover:not(:disabled) {

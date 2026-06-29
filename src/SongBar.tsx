@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 
 type SongRef = { id: string; name: string };
+type ExportFormat = "mp3" | "wav";
 
 type Props = {
   songs: SongRef[];
@@ -15,7 +16,7 @@ type Props = {
   onNew: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onExport: () => void;
+  onExport: (format: ExportFormat) => void;
   exporting: boolean;
 };
 
@@ -24,6 +25,7 @@ export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(active?.name ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [format, setFormat] = useState<ExportFormat>("mp3");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset transient UI when the active song changes out from under us.
@@ -119,15 +121,28 @@ export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename
         </button>
       )}
 
-      <button
-        className="song-bar-btn song-bar-export"
-        onClick={onExport}
-        disabled={exporting}
-        aria-label="Export song"
-        title="Export as MP3 or WAV"
-      >
-        {exporting ? "Exporting…" : "⬇ Export"}
-      </button>
+      <span className="song-bar-export-group">
+        <select
+          className="song-bar-format"
+          value={format}
+          onChange={(e) => setFormat(e.target.value as ExportFormat)}
+          disabled={exporting}
+          aria-label="Export format"
+          title="Export format"
+        >
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+        </select>
+        <button
+          className="song-bar-btn song-bar-export"
+          onClick={() => onExport(format)}
+          disabled={exporting}
+          aria-label="Export song"
+          title={`Export as ${format.toUpperCase()}`}
+        >
+          {exporting ? "Exporting…" : "⬇ Export"}
+        </button>
+      </span>
     </div>
   );
 }
