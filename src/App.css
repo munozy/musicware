@@ -1018,6 +1018,22 @@ kbd {
   font-size: 0.82rem;
   color: var(--text-dim);
 }
+.song-bar-export {
+  margin-left: auto; /* push Export to the right end of the bar */
+  font-weight: 700;
+}
+.song-bar-export:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.song-export-msg {
+  margin: 0;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
 
 .song-body {
   flex: 1;

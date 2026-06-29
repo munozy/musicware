@@ -61,7 +61,7 @@ function distortionCurve(amount = 600): Float32Array {
   return curve;
 }
 
-function reverbImpulse(ac: AudioContext, seconds = 1.4, decay = 3): AudioBuffer {
+function reverbImpulse(ac: BaseAudioContext, seconds = 1.4, decay = 3): AudioBuffer {
   const rate = ac.sampleRate;
   const len = Math.max(1, Math.floor(rate * seconds));
   const buf = ac.createBuffer(2, len, rate);
@@ -74,21 +74,23 @@ function reverbImpulse(ac: AudioContext, seconds = 1.4, decay = 3): AudioBuffer 
 
 export type VoiceHandle = { stop: () => void };
 
+type ChainCtx = BaseAudioContext; // AudioContext (live) OR OfflineAudioContext (export)
+
 /**
- * Play a decoded voice buffer through the given effect chain. Returns a handle whose stop()
- * is idempotent and releases every node. `onEnded` fires on natural end or stop.
+ * Wire `source` through `effect`'s node graph to `ctx.destination`, in EITHER a live or an
+ * OfflineAudioContext (shared by live preview/playback and offline export — same sound).
+ * Sets the playback rate, starts any modulator oscillator, and returns the nodes/oscillators
+ * so the live caller can disconnect/stop them (the offline render just plays to completion).
  */
-export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onEnded?: () => void): VoiceHandle {
-  const ac = audioCtx();
-  if (ac.state === "suspended") void ac.resume();
-
-  const source = ac.createBufferSource();
-  source.buffer = buffer;
+function buildEffectChain(
+  ctx: ChainCtx,
+  source: AudioBufferSourceNode,
+  effect: VoiceEffect,
+): { nodes: AudioNode[]; stoppables: AudioScheduledSourceNode[] } {
   source.playbackRate.value = effectPlaybackRate(effect);
-
-  const nodes: AudioNode[] = []; // to disconnect on stop
-  const stoppables: AudioScheduledSourceNode[] = [source]; // to stop() on cleanup
-  let head: AudioNode = source; // current end of the serial chain
+  const nodes: AudioNode[] = [];
+  const stoppables: AudioScheduledSourceNode[] = [source];
+  let head: AudioNode = source;
   const series = (node: AudioNode) => {
     head.connect(node);
     head = node;
@@ -97,10 +99,10 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
 
   switch (effect) {
     case "distortion": {
-      const ws = ac.createWaveShaper();
+      const ws = ctx.createWaveShaper();
       ws.curve = distortionCurve(600);
       ws.oversample = "4x";
-      const makeup = ac.createGain();
+      const makeup = ctx.createGain();
       makeup.gain.value = 0.7; // tame the level the curve adds
       series(ws);
       series(makeup);
@@ -109,9 +111,9 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
     case "robot": {
       // Ring modulation: multiply the signal by a low-frequency carrier (gain base 0,
       // carrier swings it ±1) → metallic robot timbre.
-      const ring = ac.createGain();
+      const ring = ctx.createGain();
       ring.gain.value = 0;
-      const carrier = ac.createOscillator();
+      const carrier = ctx.createOscillator();
       carrier.frequency.value = 60;
       carrier.connect(ring.gain);
       carrier.start();
@@ -120,22 +122,22 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
       break;
     }
     case "echo": {
-      const delay = ac.createDelay(1.0);
+      const delay = ctx.createDelay(1.0);
       delay.delayTime.value = 0.25;
-      const feedback = ac.createGain();
+      const feedback = ctx.createGain();
       feedback.gain.value = 0.4;
-      const wet = ac.createGain();
+      const wet = ctx.createGain();
       wet.gain.value = 0.7;
       source.connect(delay);
       delay.connect(feedback);
       feedback.connect(delay); // feedback loop
       delay.connect(wet);
-      wet.connect(ac.destination);
+      wet.connect(ctx.destination);
       nodes.push(delay, feedback, wet);
       break; // head stays = source → dry path wired below
     }
     case "telephone": {
-      const bp = ac.createBiquadFilter();
+      const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.value = 1500;
       bp.Q.value = 1.2;
@@ -143,13 +145,13 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
       break;
     }
     case "reverb": {
-      const conv = ac.createConvolver();
-      conv.buffer = reverbImpulse(ac);
-      const wet = ac.createGain();
+      const conv = ctx.createConvolver();
+      conv.buffer = reverbImpulse(ctx);
+      const wet = ctx.createGain();
       wet.gain.value = 0.85;
       source.connect(conv);
       conv.connect(wet);
-      wet.connect(ac.destination);
+      wet.connect(ctx.destination);
       nodes.push(conv, wet);
       break; // dry path wired below too
     }
@@ -160,7 +162,21 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
       break; // straight through (rate already set for chipmunk/monster)
   }
 
-  head.connect(ac.destination);
+  head.connect(ctx.destination);
+  return { nodes, stoppables };
+}
+
+/**
+ * Play a decoded voice buffer through the given effect chain (live). Returns a handle whose
+ * stop() is idempotent and releases every node. `onEnded` fires on natural end or stop.
+ */
+export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onEnded?: () => void): VoiceHandle {
+  const ac = audioCtx();
+  if (ac.state === "suspended") void ac.resume();
+
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+  const { nodes, stoppables } = buildEffectChain(ac, source, effect);
 
   let stopped = false;
   const cleanup = () => {
@@ -191,4 +207,20 @@ export function playVoice(buffer: AudioBuffer, effect: VoiceEffect = "none", onE
   source.onended = cleanup;
   source.start();
   return { stop: cleanup };
+}
+
+/**
+ * Schedule a voice buffer (through its effect) into an OfflineAudioContext at `whenSec`, for
+ * song export. No stop handle — the offline render plays every source to completion.
+ */
+export function renderVoiceInto(
+  ctx: OfflineAudioContext,
+  buffer: AudioBuffer,
+  effect: VoiceEffect,
+  whenSec: number,
+): void {
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  buildEffectChain(ctx, source, effect);
+  source.start(Math.max(0, whenSec));
 }

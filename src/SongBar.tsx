@@ -15,9 +15,11 @@ type Props = {
   onNew: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onExport: () => void;
+  exporting: boolean;
 };
 
-export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename, onDelete }: Props) {
+export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename, onDelete, onExport, exporting }: Props) {
   const active = songs.find((s) => s.id === activeSongId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(active?.name ?? "");
@@ -116,6 +118,16 @@ export default function SongBar({ songs, activeSongId, onSelect, onNew, onRename
           🗑
         </button>
       )}
+
+      <button
+        className="song-bar-btn song-bar-export"
+        onClick={onExport}
+        disabled={exporting}
+        aria-label="Export song"
+        title="Export as MP3 or WAV"
+      >
+        {exporting ? "Exporting…" : "⬇ Export"}
+      </button>
     </div>
   );
 }
