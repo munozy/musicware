@@ -1,4 +1,4 @@
-import type { Recording, RecEvent } from "./recordings";
+import { isVoice, type Recording, type RecEvent, type VoiceEffect } from "./recordings";
 import type { SynthEvent } from "./synth";
 
 /**
@@ -218,6 +218,49 @@ export function flattenArrangement(
   // first, making both notes capture whichever preset fired last (the overlap bug).
   events.sort((a, b) => a.t - b.t);
   return events;
+}
+
+/** A voice clip to schedule for audio playback alongside the symbolic stream (ADR-0009). */
+export type VoiceClipPlay = {
+  recordingId: string;
+  blobKey: string;
+  effect: VoiceEffect;
+  startMs: number;
+  loopCount: number;
+  durationMs: number;
+};
+
+/**
+ * The voice (audio) clips an arrangement should play, with the SAME mute/solo gating as
+ * `flattenArrangement` (solo wins over mute; per-clip mute and dangling refs skipped).
+ * Voice clips carry no symbolic events, so `flattenArrangement` naturally ignores them —
+ * this is the parallel audio pass the Player schedules through Web Audio (voiceAudio.ts).
+ */
+export function voiceClipPlays(
+  arr: Arrangement,
+  recordings: Recording[] | Map<string, Recording>,
+): VoiceClipPlay[] {
+  const byId = toMap(recordings);
+  const anySolo = arr.tracks.some((t) => t.soloed);
+  const plays: VoiceClipPlay[] = [];
+  for (const track of arr.tracks) {
+    const audible = anySolo ? track.soloed : !track.muted;
+    if (!audible) continue;
+    for (const clip of track.clips) {
+      if (clip.muted) continue;
+      const rec = byId.get(clip.recordingId);
+      if (!rec || !isVoice(rec) || !rec.audio) continue;
+      plays.push({
+        recordingId: rec.id,
+        blobKey: rec.audio.blobKey,
+        effect: rec.audio.effect,
+        startMs: Math.max(0, clip.startMs),
+        loopCount: Math.max(1, Math.floor(clip.loopCount || 1)),
+        durationMs: Math.max(0, rec.durationMs),
+      });
+    }
+  }
+  return plays;
 }
 
 /**

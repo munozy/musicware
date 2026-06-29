@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   flattenArrangement,
   playArrangement,
+  voiceClipPlays,
   type Arrangement,
   type Player,
   type ScheduledEvent,
 } from "./arrangement";
+import { loadVoiceBuffer, playVoice, type VoiceHandle } from "./voiceAudio";
 import {
   loadArrangement,
   saveArrangement,
@@ -25,7 +27,7 @@ import {
   setClipTranspose as setClipTransposeStore,
 } from "./arrangementStore";
 import { emit } from "./synth";
-import type { Recording } from "./recordings";
+import { isVoice, type Recording } from "./recordings";
 
 /**
  * State hook for the Song arrangement — mirrors useRecorder shape.
@@ -40,11 +42,19 @@ export function useArrangement() {
 
   const playerRef = useRef<Player | null>(null);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Voice (audio) clips play on a parallel path (ADR-0009): per-clip start timers + the
+  // live Web Audio handles, both torn down on stop so audio never outlives playback.
+  const voiceTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const voiceHandlesRef = useRef<VoiceHandle[]>([]);
 
   // Per-recording preview (shelf ▶). Separate player from arrangement playback.
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const previewRef = useRef<Player | null>(null);
+  const voicePreviewRef = useRef<VoiceHandle | null>(null);
   const previewEndRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The take a preview is INTENDED for — guards the async voice decode against a newer
+  // preview that superseded it before its buffer finished decoding.
+  const previewIntentRef = useRef<string | null>(null);
 
   // Persist arrangement to localStorage on every change (mirrors useRecorder).
   useEffect(() => {
@@ -108,7 +118,7 @@ export function useArrangement() {
     setArrangement((prev) => setClipTransposeStore(prev, clipId, semitones));
   }, []);
 
-  /** Stop any in-progress recording preview and release its notes. */
+  /** Stop any in-progress recording preview and release its notes / voice audio. */
   const stopPreview = useCallback(() => {
     if (previewEndRef.current) {
       clearTimeout(previewEndRef.current);
@@ -118,10 +128,23 @@ export function useArrangement() {
       previewRef.current.stop();
       previewRef.current = null;
     }
+    if (voicePreviewRef.current) {
+      voicePreviewRef.current.stop();
+      voicePreviewRef.current = null;
+    }
+    previewIntentRef.current = null;
     setPreviewingId(null);
   }, []);
 
-  /** Internal stop — releases all held notes and clears state. */
+  /** Cancel pending voice-clip starts and stop any voice audio still playing. */
+  const stopVoiceClips = useCallback(() => {
+    for (const id of voiceTimersRef.current) clearTimeout(id);
+    voiceTimersRef.current = [];
+    for (const h of voiceHandlesRef.current) h.stop();
+    voiceHandlesRef.current = [];
+  }, []);
+
+  /** Internal stop — releases all held notes + voice audio and clears state. */
   const stopInternal = useCallback(() => {
     if (endTimerRef.current) {
       clearTimeout(endTimerRef.current);
@@ -131,9 +154,10 @@ export function useArrangement() {
       playerRef.current.stop();
       playerRef.current = null;
     }
+    stopVoiceClips();
     setIsPlaying(false);
     setPlayStartedAt(null);
-  }, []);
+  }, [stopVoiceClips]);
 
   /**
    * Flatten the arrangement and start playback via playArrangement.
@@ -149,16 +173,35 @@ export function useArrangement() {
       setIsPlaying(true);
       setPlayStartedAt(performance.now());
 
-      // Clear the playing flag just after the final event (mirrors useRecorder's end timer).
-      const lastT = events.length > 0 ? events[events.length - 1].t : 0;
+      // Voice (audio) clips: schedule each on the SAME wall-clock as the symbolic scheduler
+      // (setTimeout from playback start), decoding + playing the buffer through its effect.
+      // A loop replays the buffer; transpose is a no-op for audio (noted in ADR-0009).
+      let endMs = events.length > 0 ? events[events.length - 1].t : 0;
+      for (const vp of voiceClipPlays(arrangement, recordings)) {
+        for (let k = 0; k < vp.loopCount; k++) {
+          const at = vp.startMs + k * vp.durationMs;
+          endMs = Math.max(endMs, at + vp.durationMs);
+          const timer = setTimeout(() => {
+            void loadVoiceBuffer(vp.blobKey).then((buf) => {
+              if (!buf || !playerRef.current) return; // stopped before the buffer decoded
+              voiceHandlesRef.current.push(playVoice(buf, vp.effect));
+            });
+          }, at);
+          voiceTimersRef.current.push(timer);
+        }
+      }
+
+      // Clear the playing flag + stop voice audio just after the final event (mirrors
+      // useRecorder's end timer); endMs spans both the symbolic stream and voice clips.
       endTimerRef.current = setTimeout(() => {
         playerRef.current = null;
         endTimerRef.current = null;
+        stopVoiceClips();
         setIsPlaying(false);
         setPlayStartedAt(null);
-      }, lastT + 1);
+      }, endMs + 1);
     },
-    [arrangement],
+    [arrangement, stopVoiceClips],
   );
 
   /** Stop playback and release held notes (no stuck note guarantee). */
@@ -169,12 +212,34 @@ export function useArrangement() {
   /** Preview a single saved recording (shelf ▶); clicking the playing one stops it. */
   const previewRecording = useCallback(
     (rec: Recording) => {
-      if (previewRef.current && !previewRef.current.stopped && previewingId === rec.id) {
+      const playingThis = previewingId === rec.id && (previewRef.current || voicePreviewRef.current);
+      if (playingThis) {
         stopPreview();
         return;
       }
       stopPreview();
       stopInternal(); // don't overlap a preview with arrangement playback
+      previewIntentRef.current = rec.id;
+
+      // Voice take → audio path (decode + effect chain); keyboard take → symbolic replay.
+      if (isVoice(rec) && rec.audio) {
+        const { effect, blobKey } = rec.audio;
+        setPreviewingId(rec.id); // optimistic — the decode is async
+        void loadVoiceBuffer(blobKey).then((buf) => {
+          if (previewIntentRef.current !== rec.id) return; // a newer preview superseded this
+          if (!buf) {
+            previewIntentRef.current = null;
+            setPreviewingId(null);
+            return;
+          }
+          voicePreviewRef.current = playVoice(buf, effect, () => {
+            voicePreviewRef.current = null;
+            setPreviewingId((cur) => (cur === rec.id ? null : cur));
+          });
+        });
+        return;
+      }
+
       const events = [...rec.events].sort((a, b) => a.t - b.t) as ScheduledEvent[];
       previewRef.current = playArrangement(events, emit);
       setPreviewingId(rec.id);
