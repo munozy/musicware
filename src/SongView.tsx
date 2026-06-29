@@ -9,6 +9,7 @@ import { useArrangement } from "./useArrangement";
 import ClipShelf from "./ClipShelf";
 import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
+import SongBar from "./SongBar";
 import type { Recording } from "./recordings";
 
 type Props = {
@@ -19,6 +20,12 @@ type Props = {
 export default function SongView({ recordings, onGoToPlay }: Props) {
   const {
     arrangement,
+    songs,
+    activeSongId,
+    newSong,
+    selectSong,
+    renameSong,
+    deleteSong,
     isPlaying,
     playStartedAt,
     previewingId,
@@ -59,6 +66,14 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
 
   return (
     <div className="song-view">
+      <SongBar
+        songs={songs.map((s) => ({ id: s.id, name: s.name }))}
+        activeSongId={activeSongId}
+        onSelect={selectSong}
+        onNew={newSong}
+        onRename={renameSong}
+        onDelete={deleteSong}
+      />
       <SongTransport
         isPlaying={isPlaying}
         onPlay={play}

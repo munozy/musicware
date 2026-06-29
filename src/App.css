@@ -920,6 +920,65 @@ kbd {
   min-height: 0;
 }
 
+/* --- Song library CRUD bar --- */
+.song-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.song-bar-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.song-bar-select,
+.song-bar-name-input {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 140px;
+}
+.song-bar-name-input {
+  border-color: var(--accent);
+}
+.song-bar-btn {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.song-bar-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.song-bar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.song-bar-btn.danger:hover {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: #fff;
+}
+.song-bar-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
 .song-body {
   flex: 1;
   display: flex;

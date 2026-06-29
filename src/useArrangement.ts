@@ -8,9 +8,8 @@ import {
   type ScheduledEvent,
 } from "./arrangement";
 import { loadVoiceBuffer, playVoice, type VoiceHandle } from "./voiceAudio";
+import { loadSongs, saveSongs, createSong } from "./songsStore";
 import {
-  loadArrangement,
-  saveArrangement,
   addClip,
   moveClip as moveClipStore,
   addTrack as addTrackStore,
@@ -36,7 +35,26 @@ import { isVoice, type Recording } from "./recordings";
  * arrangement Player lifecycle (play/stop + no-stranded-note guarantee).
  */
 export function useArrangement() {
-  const [arrangement, setArrangement] = useState<Arrangement>(() => loadArrangement());
+  // The song LIBRARY (CRUD) + the active song id. The exposed `arrangement` is the active
+  // song; every mutation below updates it within the list via the stable `setArrangement`.
+  const initial = useState(() => loadSongs())[0];
+  const [songs, setSongs] = useState<Arrangement[]>(initial.songs);
+  const [activeSongId, setActiveSongId] = useState<string>(initial.activeId);
+  const activeIdRef = useRef(activeSongId);
+  activeIdRef.current = activeSongId;
+
+  const arrangement = songs.find((s) => s.id === activeSongId) ?? songs[0];
+
+  // Drop-in replacement for the old useState setter: applies the update to the ACTIVE song.
+  // Stable (reads the active id from a ref) so the mutation callbacks keep empty deps.
+  const setArrangement = useCallback((updater: Arrangement | ((prev: Arrangement) => Arrangement)) => {
+    setSongs((prev) =>
+      prev.map((s) =>
+        s.id === activeIdRef.current ? (typeof updater === "function" ? (updater as (p: Arrangement) => Arrangement)(s) : updater) : s,
+      ),
+    );
+  }, []);
+
   const [isPlaying, setIsPlaying] = useState(false);
   // Wall-clock (performance.now) at playback start; drives the animated playhead. Null when stopped.
   const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
@@ -57,10 +75,10 @@ export function useArrangement() {
   // preview that superseded it before its buffer finished decoding.
   const previewIntentRef = useRef<string | null>(null);
 
-  // Persist arrangement to localStorage on every change (mirrors useRecorder).
+  // Persist the whole library + active id on any change (mirrors useRecorder).
   useEffect(() => {
-    saveArrangement(arrangement);
-  }, [arrangement]);
+    saveSongs(songs, activeSongId);
+  }, [songs, activeSongId]);
 
   /** Place a recording clip on a track at an absolute ms position. */
   const placeClip = useCallback((trackId: string, recordingId: string, startMs: number) => {
@@ -260,6 +278,51 @@ export function useArrangement() {
     [previewingId, stopPreview, stopInternal],
   );
 
+  // ---- Song library CRUD ----
+
+  /** Create a new empty song ("Song N") and switch to it. */
+  const newSong = useCallback(() => {
+    stopInternal();
+    stopPreview();
+    setSongs((prev) => {
+      const song = createSong(prev);
+      setActiveSongId(song.id);
+      return [...prev, song];
+    });
+  }, [stopInternal, stopPreview]);
+
+  /** Switch the active song (stops playback first so a player can't carry across songs). */
+  const selectSong = useCallback(
+    (id: string) => {
+      stopInternal();
+      stopPreview();
+      setActiveSongId(id);
+    },
+    [stopInternal, stopPreview],
+  );
+
+  /** Rename a song. Empty/whitespace ignored. */
+  const renameSong = useCallback((id: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSongs((prev) => prev.map((s) => (s.id === id ? { ...s, name: trimmed } : s)));
+  }, []);
+
+  /** Delete a song. Refuses the last one; if the active song goes, fall back to the first remaining. */
+  const deleteSong = useCallback(
+    (id: string) => {
+      stopInternal();
+      stopPreview();
+      setSongs((prev) => {
+        if (prev.length <= 1) return prev; // always keep at least one song
+        const next = prev.filter((s) => s.id !== id);
+        if (id === activeIdRef.current) setActiveSongId(next[0].id);
+        return next;
+      });
+    },
+    [stopInternal, stopPreview],
+  );
+
   // Release notes on unmount (HMR / mode switch) — mirrors useRecorder cleanup.
   useEffect(() => {
     return () => {
@@ -270,6 +333,12 @@ export function useArrangement() {
 
   return {
     arrangement,
+    songs,
+    activeSongId,
+    newSong,
+    selectSong,
+    renameSong,
+    deleteSong,
     isPlaying,
     playStartedAt,
     previewingId,
