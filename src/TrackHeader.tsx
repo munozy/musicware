@@ -105,53 +105,55 @@ export default function TrackHeader({
         onClick={cycleColor}
       />
 
-      <button
-        className={`track-btn track-mute${track.muted ? " active" : ""}`}
-        aria-pressed={track.muted}
-        aria-label={`${track.muted ? "Unmute" : "Mute"} ${track.name}`}
-        title="Mute"
-        onClick={() => onToggleMute(track.id)}
-      >
-        M
-      </button>
-      <button
-        className={`track-btn track-solo${track.soloed ? " active" : ""}`}
-        aria-pressed={track.soloed}
-        aria-label={`${track.soloed ? "Unsolo" : "Solo"} ${track.name}`}
-        title="Solo"
-        onClick={() => onToggleSolo(track.id)}
-      >
-        S
-      </button>
-
-      {confirming ? (
-        <span className="track-delete-confirm">
-          <span className="track-confirm-label">Remove?</span>
-          <button
-            className="track-btn track-confirm-yes"
-            aria-label={`Confirm remove ${track.name}`}
-            onClick={() => {
-              setConfirming(false);
-              onRemove(track.id);
-            }}
-          >
-            Yes
-          </button>
-          <button className="track-btn" aria-label="Cancel remove" onClick={() => setConfirming(false)}>
-            No
-          </button>
-        </span>
-      ) : (
+      <span className="track-actions">
         <button
-          className="track-btn track-delete"
-          aria-label={`Remove ${track.name}`}
-          disabled={!canRemove}
-          title={canRemove ? "Remove track" : "Keep at least one track"}
-          onClick={() => setConfirming(true)}
+          className={`track-btn track-mute${track.muted ? " active" : ""}`}
+          aria-pressed={track.muted}
+          aria-label={`${track.muted ? "Unmute" : "Mute"} ${track.name}`}
+          title="Mute"
+          onClick={() => onToggleMute(track.id)}
         >
-          ✕
+          M
         </button>
-      )}
+        <button
+          className={`track-btn track-solo${track.soloed ? " active" : ""}`}
+          aria-pressed={track.soloed}
+          aria-label={`${track.soloed ? "Unsolo" : "Solo"} ${track.name}`}
+          title="Solo"
+          onClick={() => onToggleSolo(track.id)}
+        >
+          S
+        </button>
+
+        {confirming ? (
+          <span className="track-delete-confirm">
+            <span className="track-confirm-label">Remove?</span>
+            <button
+              className="track-btn track-confirm-yes"
+              aria-label={`Confirm remove ${track.name}`}
+              onClick={() => {
+                setConfirming(false);
+                onRemove(track.id);
+              }}
+            >
+              Yes
+            </button>
+            <button className="track-btn" aria-label="Cancel remove" onClick={() => setConfirming(false)}>
+              No
+            </button>
+          </span>
+        ) : (
+          <button
+            className="track-btn track-delete"
+            aria-label={`Remove ${track.name}`}
+            disabled={!canRemove}
+            title={canRemove ? "Remove track" : "Keep at least one track"}
+            onClick={() => setConfirming(true)}
+          >
+            ✕
+          </button>
+        )}
+      </span>
     </div>
   );
 }
