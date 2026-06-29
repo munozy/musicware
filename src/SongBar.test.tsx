@@ -14,6 +14,8 @@ const baseProps = () => ({
   onNew: vi.fn(),
   onRename: vi.fn(),
   onDelete: vi.fn(),
+  onExport: vi.fn(),
+  exporting: false,
 });
 
 describe("SongBar", () => {
@@ -56,5 +58,16 @@ describe("SongBar", () => {
   it("disables delete when only one song remains", () => {
     render(<SongBar {...p} songs={[{ id: "s1", name: "Song 1" }]} />);
     expect((screen.getByRole("button", { name: /delete song/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("Export calls onExport; shows 'Exporting…' and is disabled while exporting", () => {
+    const { rerender } = render(<SongBar {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: /export song/i }));
+    expect(p.onExport).toHaveBeenCalledOnce();
+
+    rerender(<SongBar {...p} exporting={true} />);
+    const btn = screen.getByRole("button", { name: /export song/i }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toMatch(/exporting/i);
   });
 });

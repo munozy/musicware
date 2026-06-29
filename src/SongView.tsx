@@ -5,11 +5,15 @@
  * If recordings is empty, shows the DESIGN-002 §9 interstitial.
  */
 
+import { useCallback, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { useArrangement } from "./useArrangement";
 import ClipShelf from "./ClipShelf";
 import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
+import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
 import type { Recording } from "./recordings";
 
 type Props = {
@@ -50,6 +54,46 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
     stop,
   } = useArrangement();
 
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+
+  const handleExport = useCallback(async () => {
+    if (!songHasContent(arrangement, recordings)) {
+      setExportMsg("Nothing to export yet — add some clips first.");
+      return;
+    }
+    setExportMsg(null);
+    const safeName = (arrangement.name || "song").replace(/[^\w.-]+/g, "_");
+    let path: string | null = null;
+    try {
+      path = await save({
+        defaultPath: `${safeName}.mp3`,
+        filters: [
+          { name: "MP3 audio", extensions: ["mp3"] },
+          { name: "WAV audio", extensions: ["wav"] },
+        ],
+      });
+    } catch (e) {
+      console.error("save dialog failed", e);
+      setExportMsg("Couldn't open the save dialog.");
+      return;
+    }
+    if (!path) return; // user cancelled
+
+    setExporting(true);
+    try {
+      const format: ExportFormat = path.toLowerCase().endsWith(".wav") ? "wav" : "mp3";
+      const bytes = await renderSongFile(arrangement, recordings, format);
+      await writeFile(path, bytes);
+      setExportMsg(`Exported ${format.toUpperCase()} ✓`);
+    } catch (e) {
+      console.error("export failed", e);
+      setExportMsg("Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }, [arrangement, recordings]);
+
   if (recordings.length === 0) {
     return (
       <div className="song-interstitial">
@@ -74,7 +118,14 @@ export default function SongView({ recordings, onGoToPlay }: Props) {
         onNew={newSong}
         onRename={renameSong}
         onDelete={deleteSong}
+        onExport={handleExport}
+        exporting={exporting}
       />
+      {exportMsg && (
+        <p className="song-export-msg" role="status">
+          {exportMsg}
+        </p>
+      )}
       <SongTransport
         isPlaying={isPlaying}
         onPlay={play}
