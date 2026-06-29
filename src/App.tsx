@@ -12,6 +12,7 @@ import Library from "./Library";
 import ModeToggle, { type AppMode } from "./ModeToggle";
 import SongView from "./SongView";
 import VoiceView from "./VoiceView";
+import VideoView from "./VideoView";
 import { useRecorder } from "./useRecorder";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVisualizerStyle } from "./useVisualizerStyle";
@@ -141,6 +142,12 @@ function App() {
             onAddRecordings={rec.addRecordings}
             onGoToPlay={() => setMode("play")}
           />
+        </main>
+      )}
+
+      {mode === "video" && (
+        <main className="song-main">
+          <VideoView recordings={rec.recordings} onGoToSong={() => setMode("song")} />
         </main>
       )}
     </div>

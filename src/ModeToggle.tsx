@@ -4,10 +4,10 @@
  * Left/Right arrows move within the group.
  */
 
-export type AppMode = "play" | "voice" | "song";
+export type AppMode = "play" | "voice" | "song" | "video";
 
-const ORDER: AppMode[] = ["play", "voice", "song"];
-const LABEL: Record<AppMode, string> = { play: "Play", voice: "Voice", song: "Song" };
+const ORDER: AppMode[] = ["play", "voice", "song", "video"];
+const LABEL: Record<AppMode, string> = { play: "Play", voice: "Voice", song: "Song", video: "Video" };
 
 type Props = {
   mode: AppMode;

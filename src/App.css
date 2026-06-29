@@ -782,6 +782,144 @@ kbd {
   overflow: hidden;
 }
 
+/* --- Video section (ADR-0010) --- */
+.video-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.video-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.video-song-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.video-song-len {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.video-preview {
+  align-self: center;
+  width: min(720px, 92%);
+  aspect-ratio: 16 / 9;
+  margin: 18px 0 10px;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.video-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.video-preview-empty {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+.video-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 10px;
+  flex-wrap: wrap;
+}
+.video-len-readout {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.video-strip {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px 18px;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
+}
+.video-strip-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+.video-thumb {
+  flex: 0 0 auto;
+  width: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.video-thumb.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.video-thumb-img {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+  display: block;
+}
+.video-thumb-loading {
+  background: rgba(255, 255, 255, 0.06);
+}
+.video-thumb-name {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.video-thumb-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.video-dur-input {
+  width: 48px;
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 4px;
+  font-size: 0.78rem;
+}
+.video-dur-unit {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.video-thumb-actions {
+  display: flex;
+  gap: 3px;
+}
+.video-thumb-del:hover {
+  background: var(--rec);
+}
+
 /* --- Voice section (ADR-0009) --- */
 .voice-main {
   flex: 1;

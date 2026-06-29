@@ -73,4 +73,11 @@ describe("ModeToggle", () => {
     render(<ModeToggle mode="play" onChange={vi.fn()} isRecording={true} />);
     expect((screen.getByRole("button", { name: /voice/i }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("renders the Video segment and fires onChange('video') on click", () => {
+    const onChange = vi.fn();
+    render(<ModeToggle mode="song" onChange={onChange} isRecording={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+    expect(onChange).toHaveBeenCalledWith("video");
+  });
 });
