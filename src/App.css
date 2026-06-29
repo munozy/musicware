@@ -132,8 +132,13 @@ kbd {
   box-shadow: 0 0 14px var(--accent);
 }
 
-.topbar .transport {
+/* Pin the recorder + volume group to the right corner — in every mode, whether or not
+   the Play-only Transport is present. */
+.topbar-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
 }
 
 /* ---- Transport / record ------------------------------------------ */
@@ -1314,6 +1319,18 @@ kbd {
   cursor: pointer;
   flex: 0 0 auto;
   padding: 0;
+}
+/* Mute / Solo / delete stacked vertically (compact in the 168px header). */
+.track-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.track-actions > .track-btn {
+  width: 22px;
+  text-align: center;
+  padding: 1px 0;
 }
 .track-delete {
   color: #e06a8b;

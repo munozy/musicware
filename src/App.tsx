@@ -61,19 +61,21 @@ function App() {
           onChange={setMode}
           isRecording={rec.isRecording}
         />
-        {/* The keyboard recorder belongs only to Play — it's irrelevant (a no-op trap) in
-            Voice (which has its own Record button) and Song. */}
-        {mode === "play" && (
-          <Transport
-            recordBtnRef={recordBtnRef}
-            isRecording={rec.isRecording}
-            elapsedMs={rec.elapsedMs}
-            savedCount={rec.recordings.length}
-            onStart={rec.startRecording}
-            onStop={rec.stopRecording}
-          />
-        )}
-        <VolumeControl />
+        {/* Right-aligned group: the keyboard recorder belongs only to Play (a no-op trap in
+            Voice/Song), but the volume control stays pinned to the right corner in every mode. */}
+        <div className="topbar-right">
+          {mode === "play" && (
+            <Transport
+              recordBtnRef={recordBtnRef}
+              isRecording={rec.isRecording}
+              elapsedMs={rec.elapsedMs}
+              savedCount={rec.recordings.length}
+              onStart={rec.startRecording}
+              onStop={rec.stopRecording}
+            />
+          )}
+          <VolumeControl />
+        </div>
       </header>
 
       {mode === "play" && (
