@@ -162,6 +162,53 @@ describe("useArrangement — play/stop", () => {
   });
 });
 
+describe("useArrangement — seek + loop (Slice 7b)", () => {
+  it("seekTo shifts playback so a later clip's note_on fires immediately", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const rec = makeRec("r1"); // note on at clip-relative 0
+
+    act(() => result.current.placeClip(trackId, "r1", 2000)); // clip starts at 2s
+    act(() => result.current.seekTo(2000));
+    expect(result.current.seekMs).toBe(2000);
+    vi.mocked(invoke).mockClear();
+
+    act(() => result.current.play([rec]));
+    act(() => vi.advanceTimersByTime(10)); // seeked to 2s → the note is at t=0 of the stream
+    expect(callsFor("note_on")).toHaveLength(1);
+    expect(result.current.playOriginMs).toBe(2000);
+  });
+
+  it("setLoopRegion arms the loop and exposes the loop length to the playhead", () => {
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const rec = makeRec("r1");
+
+    act(() => result.current.placeClip(trackId, "r1", 0));
+    act(() => result.current.setLoopRegion({ startMs: 0, endMs: 1000 }));
+    expect(result.current.loopEnabled).toBe(true); // drag-to-cycle auto-arms
+
+    act(() => result.current.play([rec]));
+    expect(result.current.playLoopLenMs).toBe(1000);
+    expect(result.current.playOriginMs).toBe(0);
+
+    // Still playing well past the clip's own length — the loop keeps it alive.
+    act(() => vi.advanceTimersByTime(1500));
+    expect(result.current.isPlaying).toBe(true);
+  });
+
+  it("toggleLoop flips the armed flag; clearing the region disarms it", () => {
+    const { result } = renderHook(() => useArrangement());
+    act(() => result.current.setLoopRegion({ startMs: 500, endMs: 1500 }));
+    expect(result.current.loopEnabled).toBe(true);
+    act(() => result.current.toggleLoop());
+    expect(result.current.loopEnabled).toBe(false);
+    act(() => result.current.setLoopRegion(null));
+    expect(result.current.loopRegion).toBeNull();
+    expect(result.current.loopEnabled).toBe(false);
+  });
+});
+
 describe("useArrangement — unmount cleanup", () => {
   it("calls stop on unmount to release any held notes (no stranded voice)", () => {
     const { result, unmount } = renderHook(() => useArrangement());

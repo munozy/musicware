@@ -116,6 +116,13 @@ describe("Timeline", () => {
           onSuggestSection: vi.fn(),
         }}
         selection={{ selectedIds, onSelectClip, onClearSelection }}
+        seekMs={0}
+        loopRegion={null}
+        loopEnabled={false}
+        playOriginMs={0}
+        playLoopLenMs={0}
+        onSeek={vi.fn()}
+        onSetLoopRegion={vi.fn()}
       />,
     );
 

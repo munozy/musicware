@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   flattenArrangement,
+  buildPlaybackStream,
   playArrangement,
   voiceClipPlays,
   type Arrangement,
@@ -70,6 +71,18 @@ export function useArrangement() {
   const [isPlaying, setIsPlaying] = useState(false);
   // Wall-clock (performance.now) at playback start; drives the animated playhead. Null when stopped.
   const [playStartedAt, setPlayStartedAt] = useState<number | null>(null);
+
+  // Seek + loop-region (Slice 7b). Transient view state — not part of the saved song.
+  //  - seekMs: where a fresh Play starts from (0 = top).
+  //  - loopRegion: the [start,end) window to repeat; null = none.
+  //  - loopEnabled: whether the region is armed (the transport 🔁 toggle).
+  // playOrigin/playLoopLen capture the geometry of the CURRENT run so the playhead can map
+  // playback time back to an absolute timeline position (and wrap within the loop).
+  const [seekMs, setSeekMsState] = useState(0);
+  const [loopRegion, setLoopRegionState] = useState<{ startMs: number; endMs: number } | null>(null);
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const [playOriginMs, setPlayOriginMs] = useState(0);
+  const [playLoopLenMs, setPlayLoopLenMs] = useState(0);
 
   const playerRef = useRef<Player | null>(null);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -243,34 +256,66 @@ export function useArrangement() {
   }, [stopVoiceClips]);
 
   /**
-   * Flatten the arrangement and start playback via playArrangement.
-   * Guard: no-op if already playing.
+   * Flatten the arrangement and start playback via playArrangement, honouring the seek
+   * position and (if armed) the loop region. Guard: no-op if already playing.
+   *
+   * The symbolic stream is shaped by the pure `buildPlaybackStream` (seek-shift / loop-window
+   * with per-cycle force-close). Voice (audio) clips ride a parallel wall-clock path mapped
+   * through the same transform: a clip is scheduled for each play whose START lands at/after
+   * the seek (no loop) or inside the region (loop). Clips that would begin mid-window are
+   * skipped — a documented V1 limitation (no partial-buffer offset), see ADR-0009.
    */
   const play = useCallback(
     (recordings: Recording[]) => {
       if (playerRef.current && !playerRef.current.stopped) return;
 
-      const events = flattenArrangement(arrangement, recordings);
-      const player = playArrangement(events, emit);
+      const flat = flattenArrangement(arrangement, recordings);
+      const useLoop = loopEnabled && loopRegion != null && loopRegion.endMs - loopRegion.startMs > 0;
+      const loopLen = useLoop ? loopRegion!.endMs - loopRegion!.startMs : 0;
+      const origin = useLoop ? loopRegion!.startMs : Math.max(0, seekMs);
+      // Repeat enough to feel endless (~10 min) without an unbounded stream; capped so a tiny
+      // region can't explode the event count.
+      const cycles = useLoop ? Math.min(2000, Math.max(1, Math.ceil(600_000 / loopLen))) : 0;
+
+      const stream = useLoop
+        ? buildPlaybackStream(flat, { loop: { startMs: loopRegion!.startMs, endMs: loopRegion!.endMs, cycles } })
+        : buildPlaybackStream(flat, { seekMs: origin });
+
+      const player = playArrangement(stream, emit);
       playerRef.current = player;
       setIsPlaying(true);
       setPlayStartedAt(performance.now());
+      setPlayOriginMs(origin);
+      setPlayLoopLenMs(loopLen);
 
-      // Voice (audio) clips: schedule each on the SAME wall-clock as the symbolic scheduler
-      // (setTimeout from playback start), decoding + playing the buffer through its effect.
-      // A loop replays the buffer; transpose is a no-op for audio (noted in ADR-0009).
-      let endMs = events.length > 0 ? events[events.length - 1].t : 0;
+      const fireVoice = (vp: { blobKey: string; effect: VoiceEffect }, at: number) => {
+        const timer = setTimeout(() => {
+          void loadVoiceBuffer(vp.blobKey).then((buf) => {
+            if (!buf || !playerRef.current) return; // stopped before the buffer decoded
+            voiceHandlesRef.current.push(playVoice(buf, vp.effect));
+          });
+        }, at);
+        voiceTimersRef.current.push(timer);
+      };
+
+      let endMs = stream.length > 0 ? stream[stream.length - 1].t : 0;
       for (const vp of voiceClipPlays(arrangement, recordings)) {
         for (let k = 0; k < vp.loopCount; k++) {
-          const at = vp.startMs + k * vp.durationMs;
-          endMs = Math.max(endMs, at + vp.durationMs);
-          const timer = setTimeout(() => {
-            void loadVoiceBuffer(vp.blobKey).then((buf) => {
-              if (!buf || !playerRef.current) return; // stopped before the buffer decoded
-              voiceHandlesRef.current.push(playVoice(buf, vp.effect));
-            });
-          }, at);
-          voiceTimersRef.current.push(timer);
+          const playStart = vp.startMs + k * vp.durationMs;
+          if (useLoop) {
+            if (playStart >= loopRegion!.startMs && playStart < loopRegion!.endMs) {
+              const rel = playStart - loopRegion!.startMs;
+              for (let c = 0; c < cycles; c++) {
+                const at = rel + c * loopLen;
+                endMs = Math.max(endMs, at + vp.durationMs);
+                fireVoice(vp, at);
+              }
+            }
+          } else if (playStart >= origin) {
+            const at = playStart - origin;
+            endMs = Math.max(endMs, at + vp.durationMs);
+            fireVoice(vp, at);
+          }
         }
       }
 
@@ -284,13 +329,32 @@ export function useArrangement() {
         setPlayStartedAt(null);
       }, endMs + 1);
     },
-    [arrangement, stopVoiceClips],
+    [arrangement, seekMs, loopRegion, loopEnabled, stopVoiceClips],
   );
 
   /** Stop playback and release held notes (no stuck note guarantee). */
   const stop = useCallback(() => {
     stopInternal();
   }, [stopInternal]);
+
+  // --- Seek + loop-region (Slice 7b) ---------------------------------------------------------
+  /** Move the play-from position (click-to-seek on the ruler). Clamped >= 0. */
+  const seekTo = useCallback((ms: number) => setSeekMsState(Math.max(0, ms)), []);
+  /**
+   * Set (or clear) the loop region. Setting a valid region also arms the loop (drag-to-cycle,
+   * like a DAW's cycle bar); a region with no positive span clears + disarms it.
+   */
+  const setLoopRegion = useCallback((region: { startMs: number; endMs: number } | null) => {
+    if (!region || region.endMs - region.startMs <= 0) {
+      setLoopRegionState(null);
+      setLoopEnabled(false);
+      return;
+    }
+    setLoopRegionState({ startMs: Math.max(0, region.startMs), endMs: Math.max(0, region.endMs) });
+    setLoopEnabled(true);
+  }, []);
+  /** Arm/disarm the loop (transport 🔁). */
+  const toggleLoop = useCallback(() => setLoopEnabled((v) => !v), []);
 
   /** Preview a single saved recording (shelf ▶); clicking the playing one stops it. */
   const previewRecording = useCallback(
@@ -411,6 +475,14 @@ export function useArrangement() {
     importSong,
     isPlaying,
     playStartedAt,
+    seekMs,
+    loopRegion,
+    loopEnabled,
+    playOriginMs,
+    playLoopLenMs,
+    seekTo,
+    setLoopRegion,
+    toggleLoop,
     previewingId,
     placeClip,
     placeSuggestion,

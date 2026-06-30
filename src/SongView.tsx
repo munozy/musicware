@@ -45,6 +45,14 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     importSong,
     isPlaying,
     playStartedAt,
+    seekMs,
+    loopRegion,
+    loopEnabled,
+    playOriginMs,
+    playLoopLenMs,
+    seekTo,
+    setLoopRegion,
+    toggleLoop,
     previewingId,
     placeClip,
     placeSuggestion,
@@ -318,6 +326,12 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
         onSetTempo={setTempo}
         onSetBeatsPerBar={setBeatsPerBar}
         onSetSnap={setSnap}
+        seekMs={seekMs}
+        loopRegion={loopRegion}
+        loopEnabled={loopEnabled}
+        onToggleLoop={toggleLoop}
+        onClearSeek={() => seekTo(0)}
+        onClearLoop={() => setLoopRegion(null)}
       />
       {suggestState && (
         <div className="suggest-panel" role="dialog" aria-label="Suggestions">
@@ -386,6 +400,13 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
             onSetClipEffect: setClipEffect,
           }}
           selection={{ selectedIds, onSelectClip: selectClip, onClearSelection: clearSelection }}
+          seekMs={seekMs}
+          loopRegion={loopRegion}
+          loopEnabled={loopEnabled}
+          playOriginMs={playOriginMs}
+          playLoopLenMs={playLoopLenMs}
+          onSeek={seekTo}
+          onSetLoopRegion={setLoopRegion}
           trackOps={{
             onAddTrack: addTrack,
             onRenameTrack: renameTrack,

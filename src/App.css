@@ -1281,6 +1281,37 @@ kbd {
   font-size: 0.8rem;
 }
 
+/* Loop toggle (Slice 7b) — lit when the region is armed. */
+.song-transport-btn.loop-toggle.active {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.22);
+}
+
+/* Seek / loop readout chip — shows the active start position or loop window with a clear (×). */
+.transport-region {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.transport-region-clear {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.transport-region-clear:hover {
+  color: var(--text);
+}
+
 /* --- Slice 7: transport grid/tempo controls --- */
 .transport-grid {
   margin-left: auto;
@@ -1408,6 +1439,35 @@ kbd {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   background: rgba(0, 0, 0, 0.25);
+  cursor: text; /* hint: click to seek, drag to set a loop region */
+  touch-action: none;
+}
+
+/* Loop region (Slice 7b) — the [start,end) window Play repeats; dimmed while just defined,
+   brighter once armed via the transport 🔁. Sits behind the ticks; never eats pointer events. */
+.ruler-loop-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(125, 211, 252, 0.18);
+  border-left: 1px solid rgba(125, 211, 252, 0.6);
+  border-right: 1px solid rgba(125, 211, 252, 0.6);
+  pointer-events: none;
+  z-index: 0;
+}
+.ruler-loop-region.active {
+  background: rgba(125, 211, 252, 0.32);
+}
+/* Seek marker (Slice 7b) — where a fresh Play starts when no loop is armed. */
+.ruler-seek-marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  background: var(--accent, #7dd3fc);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .ruler-tick {
