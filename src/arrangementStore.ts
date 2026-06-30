@@ -254,6 +254,22 @@ export function toggleClipMuted(arr: Arrangement, clipId: string): Arrangement {
   return mapMatchingClip(arr, clipId, (c) => ({ ...c, muted: !c.muted }));
 }
 
+// ---- Transport / grid: tempo + time signature (Slice 7, US-23/24) ----
+// US-25 limitation (documented): changing tempo re-grids the ruler/snap but does NOT rescale
+// already-placed clip startMs — clips stay at their absolute ms positions.
+
+/** Set the tempo in BPM, clamped to a musical 40–300. */
+export function setTempo(arr: Arrangement, bpm: number): Arrangement {
+  const t = Math.max(40, Math.min(300, Math.round(Number.isFinite(bpm) ? bpm : 120)));
+  return { ...arr, tempoBpm: t };
+}
+
+/** Set the beats-per-bar (time-sig numerator), clamped to 1–12; denominator stays 4. */
+export function setBeatsPerBar(arr: Arrangement, beats: number): Arrangement {
+  const n = Math.max(1, Math.min(12, Math.round(Number.isFinite(beats) ? beats : 4)));
+  return { ...arr, timeSig: [n, arr.timeSig?.[1] ?? 4] };
+}
+
 // ---- Song structure: section markers + genre templates (Slice 6, US-20/21) ----
 // Sections are VISUAL guides only — flattenArrangement never reads them (they don't gate playback).
 

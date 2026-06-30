@@ -1280,6 +1280,41 @@ kbd {
   font-size: 0.8rem;
 }
 
+/* --- Slice 7: transport grid/tempo controls --- */
+.transport-grid {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.transport-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.transport-bpm {
+  width: 52px;
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 5px;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.transport-beats,
+.transport-snap {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 5px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 /* ---- Clip shelf --------------------------------------------------- */
 
 .clip-shelf {
@@ -1389,7 +1424,11 @@ kbd {
   top: 0;
   left: 0;
   width: 1px;
-  height: 8px;
+  height: 6px; /* beat line — short + dim */
+  background: rgba(255, 255, 255, 0.12);
+}
+.ruler-tick.bar::before {
+  height: 12px; /* bar line — taller + brighter */
   background: var(--border);
 }
 

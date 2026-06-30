@@ -14,6 +14,7 @@ import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
 import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
+import { gridMsFor, type SnapDivision } from "./timeScale";
 import {
   buildProjectBundle,
   serializeProject,
@@ -58,6 +59,8 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     transposeClip,
     trimClip,
     setClipEffect,
+    setTempo,
+    setBeatsPerBar,
     addSection,
     renameSection,
     moveSection,
@@ -68,6 +71,10 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     play,
     stop,
   } = useArrangement();
+
+  const [snap, setSnap] = useState<SnapDivision>("beat");
+  const beatsPerBar = arrangement.timeSig?.[0] ?? 4;
+  const gridMs = gridMsFor(snap, arrangement.tempoBpm, beatsPerBar);
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
@@ -217,6 +224,12 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
         onPlay={play}
         onStop={stop}
         recordings={recordings}
+        tempoBpm={arrangement.tempoBpm}
+        beatsPerBar={beatsPerBar}
+        snap={snap}
+        onSetTempo={setTempo}
+        onSetBeatsPerBar={setBeatsPerBar}
+        onSetSnap={setSnap}
       />
       <div className="song-body">
         <ClipShelf
@@ -231,6 +244,7 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
           recordings={recordings}
           isPlaying={isPlaying}
           playStartedAt={playStartedAt}
+          gridMs={gridMs}
           onPlaceClip={placeClip}
           clipOps={{
             onMoveClip: moveClip,

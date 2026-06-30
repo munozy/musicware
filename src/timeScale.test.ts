@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pxToMs, msToPx, snapMs } from "./timeScale";
+import { pxToMs, msToPx, snapMs, beatMs, barMs, gridMsFor } from "./timeScale";
 
 describe("pxToMs", () => {
   it("converts px to ms using the scale", () => {
@@ -64,5 +64,22 @@ describe("snapMs", () => {
     // 100ms is exactly halfway between 0 and 200 — JS Math.round goes up
     expect(snapMs(100, 200)).toBe(200);
     expect(snapMs(99, 200)).toBe(0);
+  });
+});
+
+describe("musical grid (Slice 7)", () => {
+  it("beatMs / barMs from tempo", () => {
+    expect(beatMs(120)).toBe(500); // 60000/120
+    expect(beatMs(60)).toBe(1000);
+    expect(barMs(120, 4)).toBe(2000); // 4 beats × 500
+    expect(barMs(90, 3)).toBeCloseTo((60000 / 90) * 3);
+    expect(beatMs(0)).toBe(60000); // bpm clamped to >= 1
+  });
+
+  it("gridMsFor maps a division to its step (off → 0)", () => {
+    expect(gridMsFor("off", 120, 4)).toBe(0);
+    expect(gridMsFor("beat", 120, 4)).toBe(500);
+    expect(gridMsFor("half", 120, 4)).toBe(250);
+    expect(gridMsFor("bar", 120, 4)).toBe(2000);
   });
 });
