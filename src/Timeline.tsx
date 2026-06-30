@@ -48,6 +48,7 @@ type Props = {
   clipOps: ClipOps;
   trackOps: TrackOps;
   sectionOps: SectionOps;
+  selection: Selection;
 };
 
 type ClipOps = {
@@ -63,6 +64,12 @@ type ClipOps = {
 
 const MIN_WINDOW_MS = 100; // a trimmed brick can't be shorter than one snap step
 
+export type Selection = {
+  selectedIds: Set<string>;
+  onSelectClip: (id: string, additive: boolean) => void;
+  onClearSelection: () => void;
+};
+
 function ClipBlock({
   clip,
   recordings,
@@ -75,7 +82,15 @@ function ClipBlock({
   onTrimClip,
   onSetClipEffect,
   gridMs,
-}: { clip: ClipInstance; recordings: Recording[]; gridMs: number } & ClipOps) {
+  selected,
+  onSelectClip,
+}: {
+  clip: ClipInstance;
+  recordings: Recording[];
+  gridMs: number;
+  selected: boolean;
+  onSelectClip: (id: string, additive: boolean) => void;
+} & ClipOps) {
   const nudgeMs = gridMs > 0 ? gridMs : SNAP_MS; // keyboard ←/→ step (a grid step, or 100ms when snap off)
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
@@ -177,9 +192,11 @@ function ClipBlock({
   return (
     <div
       ref={clipElRef}
-      className={`timeline-clip${clip.muted ? " muted" : ""}${trimming ? " trimming" : ""}`}
+      data-clip-id={clip.id}
+      className={`timeline-clip${clip.muted ? " muted" : ""}${trimming ? " trimming" : ""}${selected ? " selected" : ""}`}
       style={{ left: leftPx, width: widthPx }}
-      title={`${name} — drag to move · drag edges to trim · D duplicate · ↑↓ transpose · [ ] loop · M mute · Del remove`}
+      title={`${name} — click to select (Shift/⌘ adds) · drag to move · drag edges to trim · D duplicate · ↑↓ transpose · [ ] loop · M mute · Del remove`}
+      onClick={(e) => onSelectClip(clip.id, e.shiftKey || e.metaKey || e.ctrlKey)}
       draggable={!trimming}
       onDragStart={handleDragStart}
       onKeyDown={handleKeyDown}
@@ -337,6 +354,7 @@ function TrackLane({
   gridMs,
   onPlaceClip,
   clipOps,
+  selection,
 }: {
   trackId: string;
   clips: ClipInstance[];
@@ -344,6 +362,7 @@ function TrackLane({
   gridMs: number;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   clipOps: ClipOps;
+  selection: Selection;
 }) {
   const laneRef = useRef<HTMLDivElement>(null);
 
@@ -384,9 +403,20 @@ function TrackLane({
       data-testid={`lane-${trackId}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) selection.onClearSelection(); // click empty lane → clear
+      }}
     >
       {clips.map((clip) => (
-        <ClipBlock key={clip.id} clip={clip} recordings={recordings} gridMs={gridMs} {...clipOps} />
+        <ClipBlock
+          key={clip.id}
+          clip={clip}
+          recordings={recordings}
+          gridMs={gridMs}
+          selected={selection.selectedIds.has(clip.id)}
+          onSelectClip={selection.onSelectClip}
+          {...clipOps}
+        />
       ))}
     </div>
   );
@@ -418,6 +448,7 @@ export default function Timeline({
   clipOps,
   trackOps,
   sectionOps,
+  selection,
 }: Props) {
   return (
     <div className="timeline" role="region" aria-label="Timeline">
@@ -448,6 +479,7 @@ export default function Timeline({
               gridMs={gridMs}
               onPlaceClip={onPlaceClip}
               clipOps={clipOps}
+              selection={selection}
             />
           </div>
         ))}

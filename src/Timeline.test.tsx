@@ -63,10 +63,18 @@ describe("Timeline", () => {
   let onTrimClip: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onSetClipEffect: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onSelectClip: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onClearSelection: any;
+  let selectedIds: Set<string>;
   let trackOps: TrackOps;
 
   beforeEach(() => {
     onPlaceClip = vi.fn();
+    onSelectClip = vi.fn();
+    onClearSelection = vi.fn();
+    selectedIds = new Set<string>();
     onMoveClip = vi.fn();
     onAddTrack = vi.fn();
     onRemoveClip = vi.fn();
@@ -106,6 +114,7 @@ describe("Timeline", () => {
           onRemoveSection: vi.fn(),
           onApplyTemplate: vi.fn(),
         }}
+        selection={{ selectedIds, onSelectClip, onClearSelection }}
       />,
     );
 
@@ -294,6 +303,32 @@ describe("Timeline", () => {
     renderTL(arr, [makeRec("r1")]);
     expect(screen.queryByRole("combobox", { name: /effect for/i })).toBeNull();
     expect(screen.getByRole("button", { name: /transpose up/i })).toBeDefined();
+  });
+
+  it("clicking a clip selects it; Shift/⌘-click selects additively", () => {
+    const { arr } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    const block = screen.getByRole("button", { name: /r1 clip at/i });
+    fireEvent.click(block);
+    expect(onSelectClip).toHaveBeenLastCalledWith("clip-1", false);
+    fireEvent.click(block, { shiftKey: true });
+    expect(onSelectClip).toHaveBeenLastCalledWith("clip-1", true);
+    fireEvent.click(block, { metaKey: true });
+    expect(onSelectClip).toHaveBeenLastCalledWith("clip-1", true);
+  });
+
+  it("clicking an empty lane clears the selection", () => {
+    const { arr, tid } = withClip(0);
+    renderTL(arr, [makeRec("r1")]);
+    fireEvent.click(screen.getByTestId(`lane-${tid}`));
+    expect(onClearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("a selected clip gets the 'selected' class", () => {
+    const { arr } = withClip(0);
+    selectedIds = new Set(["clip-1"]);
+    const { container } = renderTL(arr, [makeRec("r1")]);
+    expect(container.querySelector(".timeline-clip.selected")).not.toBeNull();
   });
 
   it("renders left and right trim handles on a clip", () => {

@@ -14,6 +14,7 @@ import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
 import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
+import { clipPlayedMs } from "./arrangement";
 import { gridMsFor, type SnapDivision } from "./timeScale";
 import {
   buildProjectBundle,
@@ -59,6 +60,9 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     transposeClip,
     trimClip,
     setClipEffect,
+    moveClips,
+    removeClips,
+    duplicateClips,
     setTempo,
     setBeatsPerBar,
     addSection,
@@ -75,6 +79,69 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
   const [snap, setSnap] = useState<SnapDivision>("beat");
   const beatsPerBar = arrangement.timeSig?.[0] ?? 4;
   const gridMs = gridMsFor(snap, arrangement.tempoBpm, beatsPerBar);
+
+  // ---- Multi-select (Slice 8): a set of selected clip ids + group-aware move/delete/duplicate ----
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const allClips = arrangement.tracks.flatMap((t) => t.clips);
+  // Prune stale ids (a clip may have been deleted/undone) so the count + ops stay honest.
+  const liveSelected = allClips.filter((c) => selectedIds.has(c.id)).map((c) => c.id);
+  const isGroup = (id: string) => selectedIds.has(id) && liveSelected.length > 1;
+
+  const selectClip = useCallback((id: string, additive: boolean) => {
+    setSelectedIds((prev) => {
+      if (!additive) return new Set([id]);
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const deleteSelection = useCallback(() => {
+    removeClips(liveSelected);
+    setSelectedIds(new Set());
+  }, [removeClips, liveSelected]);
+
+  const duplicateSelection = useCallback(() => {
+    const clips = allClips.filter((c) => selectedIds.has(c.id));
+    if (clips.length === 0) return;
+    const durOf = (recId: string) => recordings.find((r) => r.id === recId)?.durationMs ?? 0;
+    const minStart = Math.min(...clips.map((c) => c.startMs));
+    const maxEnd = Math.max(...clips.map((c) => c.startMs + clipPlayedMs(c, durOf(c.recordingId))));
+    const offset = Math.max(0, maxEnd - minStart); // drop the copies right after the group
+    duplicateClips(clips.map((c) => ({ clipId: c.id, atMs: c.startMs + offset })));
+  }, [allClips, selectedIds, recordings, duplicateClips]);
+
+  // Group-aware clip ops: when the acted-on clip is part of a multi-selection, the action
+  // applies to the whole group; otherwise it's a normal single-clip op.
+  const handleMoveClip = useCallback(
+    (id: string, startMs: number) => {
+      if (isGroup(id)) {
+        const c = allClips.find((x) => x.id === id);
+        if (c) moveClips(liveSelected, startMs - c.startMs);
+        else moveClip(id, startMs);
+      } else moveClip(id, startMs);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedIds, allClips, moveClip, moveClips],
+  );
+  const handleRemoveClip = useCallback(
+    (id: string) => {
+      if (isGroup(id)) deleteSelection();
+      else removeClip(id);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedIds, deleteSelection, removeClip],
+  );
+  const handleDuplicateClip = useCallback(
+    (id: string, atMs: number) => {
+      if (isGroup(id)) duplicateSelection();
+      else duplicateClip(id, atMs);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedIds, duplicateSelection, duplicateClip],
+  );
 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
@@ -231,6 +298,20 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
         onSetBeatsPerBar={setBeatsPerBar}
         onSetSnap={setSnap}
       />
+      {liveSelected.length > 0 && (
+        <div className="selection-bar" role="group" aria-label="Selection actions">
+          <span className="selection-count">{liveSelected.length} selected</span>
+          <button className="song-bar-btn" onClick={duplicateSelection} aria-label="Duplicate selection">
+            ⧉ Duplicate
+          </button>
+          <button className="song-bar-btn" onClick={deleteSelection} aria-label="Delete selection">
+            ✕ Delete
+          </button>
+          <button className="song-bar-btn" onClick={clearSelection} aria-label="Clear selection">
+            Clear
+          </button>
+        </div>
+      )}
       <div className="song-body">
         <ClipShelf
           recordings={recordings}
@@ -247,15 +328,16 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
           gridMs={gridMs}
           onPlaceClip={placeClip}
           clipOps={{
-            onMoveClip: moveClip,
-            onRemoveClip: removeClip,
+            onMoveClip: handleMoveClip,
+            onRemoveClip: handleRemoveClip,
             onToggleClipMute: toggleClipMute,
-            onDuplicateClip: duplicateClip,
+            onDuplicateClip: handleDuplicateClip,
             onSetClipLoop: setClipLoop,
             onTransposeClip: transposeClip,
             onTrimClip: trimClip,
             onSetClipEffect: setClipEffect,
           }}
+          selection={{ selectedIds, onSelectClip: selectClip, onClearSelection: clearSelection }}
           trackOps={{
             onAddTrack: addTrack,
             onRenameTrack: renameTrack,

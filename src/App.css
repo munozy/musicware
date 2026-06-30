@@ -1829,8 +1829,28 @@ kbd {
 .timeline-clip-mute.active {
   background: var(--rec);
 }
+.timeline-clip.selected {
+  outline: 2px solid var(--accent-2);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 2px rgba(106, 215, 255, 0.35), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
 .timeline-clip.muted {
   opacity: 0.45;
+}
+
+/* --- Slice 8: multi-select action bar --- */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(106, 215, 255, 0.08);
+  border-bottom: 1px solid var(--border);
+}
+.selection-count {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-2);
 }
 .timeline-clip.muted .timeline-clip-label {
   text-decoration: line-through;
