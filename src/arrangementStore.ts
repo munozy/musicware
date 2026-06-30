@@ -254,6 +254,43 @@ export function toggleClipMuted(arr: Arrangement, clipId: string): Arrangement {
   return mapMatchingClip(arr, clipId, (c) => ({ ...c, muted: !c.muted }));
 }
 
+// ---- Multi-select group ops (Slice 8, US-19) ----
+
+/** Shift every clip in `ids` by `deltaMs` (clamped >= 0). Group move. */
+export function moveClips(arr: Arrangement, ids: string[], deltaMs: number): Arrangement {
+  const set = new Set(ids);
+  const d = Math.round(deltaMs);
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => set.has(c.id))) return t;
+    found = true;
+    return {
+      ...t,
+      clips: t.clips.map((c) => (set.has(c.id) ? { ...c, startMs: Math.max(0, c.startMs + d) } : c)),
+    };
+  });
+  return found ? { ...arr, tracks } : arr;
+}
+
+/** Remove every clip in `ids`. Group delete. */
+export function removeClips(arr: Arrangement, ids: string[]): Arrangement {
+  const set = new Set(ids);
+  let found = false;
+  const tracks = arr.tracks.map((t) => {
+    if (!t.clips.some((c) => set.has(c.id))) return t;
+    found = true;
+    return { ...t, clips: t.clips.filter((c) => !set.has(c.id)) };
+  });
+  return found ? { ...arr, tracks } : arr;
+}
+
+/** Duplicate several clips at once: each spec places a fresh copy at `atMs`. Group duplicate. */
+export function duplicateClips(arr: Arrangement, specs: { clipId: string; atMs: number }[]): Arrangement {
+  let out = arr;
+  for (const s of specs) out = duplicateClip(out, s.clipId, s.atMs);
+  return out;
+}
+
 // ---- Transport / grid: tempo + time signature (Slice 7, US-23/24) ----
 // US-25 limitation (documented): changing tempo re-grids the ruler/snap but does NOT rescale
 // already-placed clip startMs — clips stay at their absolute ms positions.

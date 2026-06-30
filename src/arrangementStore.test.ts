@@ -27,6 +27,9 @@ import {
   removeSection,
   applyTemplate,
   SECTION_TEMPLATES,
+  moveClips,
+  removeClips,
+  duplicateClips,
   setTempo,
   setBeatsPerBar,
 } from "./arrangementStore";
@@ -474,5 +477,46 @@ describe("transport — tempo + time signature (Slice 7)", () => {
     expect(setBeatsPerBar(a, 3).timeSig).toEqual([3, 4]);
     expect(setBeatsPerBar(a, 0).timeSig).toEqual([1, 4]);
     expect(setBeatsPerBar(a, 99).timeSig).toEqual([12, 4]);
+  });
+});
+
+describe("multi-select group ops (Slice 8)", () => {
+  // two clips on one track at 1000 and 5000
+  const seed = () => {
+    const base = newArrangement();
+    const tid = base.tracks[0].id;
+    let arr = addClip(base, tid, "r1", 1000);
+    arr = addClip(arr, tid, "r2", 5000);
+    const [a, b] = arr.tracks[0].clips;
+    return { arr, aId: a.id, bId: b.id };
+  };
+
+  it("moveClips shifts every id by the delta (clamped >= 0); others untouched", () => {
+    const { arr, aId, bId } = seed();
+    const out = moveClips(arr, [aId, bId], 500);
+    expect(out.tracks[0].clips.map((c) => c.startMs)).toEqual([1500, 5500]);
+    // a big negative delta clamps each at 0, independently
+    expect(moveClips(arr, [aId], -9999).tracks[0].clips[0].startMs).toBe(0);
+    expect(moveClips(arr, ["ghost"], 100)).toBe(arr); // none match → same ref
+  });
+
+  it("removeClips drops all the given ids at once", () => {
+    const { arr, aId, bId } = seed();
+    expect(removeClips(arr, [aId, bId]).tracks[0].clips).toHaveLength(0);
+    expect(removeClips(arr, [aId]).tracks[0].clips.map((c) => c.id)).toEqual([bId]);
+    expect(removeClips(arr, ["ghost"])).toBe(arr);
+  });
+
+  it("duplicateClips places a fresh copy for each spec (after its original)", () => {
+    const { arr, aId, bId } = seed();
+    const out = duplicateClips(arr, [
+      { clipId: aId, atMs: 3000 },
+      { clipId: bId, atMs: 7000 },
+    ]);
+    expect(out.tracks[0].clips).toHaveLength(4);
+    const starts = out.tracks[0].clips.map((c) => c.startMs).sort((x, y) => x - y);
+    expect(starts).toEqual([1000, 3000, 5000, 7000]);
+    // copies are fresh ids
+    expect(new Set(out.tracks[0].clips.map((c) => c.id)).size).toBe(4);
   });
 });

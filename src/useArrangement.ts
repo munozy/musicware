@@ -26,6 +26,9 @@ import {
   setClipTranspose as setClipTransposeStore,
   setClipTrim as setClipTrimStore,
   setClipEffect as setClipEffectStore,
+  moveClips as moveClipsStore,
+  removeClips as removeClipsStore,
+  duplicateClips as duplicateClipsStore,
   setTempo as setTempoStore,
   setBeatsPerBar as setBeatsPerBarStore,
   addSection as addSectionStore,
@@ -153,6 +156,17 @@ export function useArrangement() {
   );
   const setClipEffect = useCallback((clipId: string, effect: VoiceEffect) => {
     setArrangement((prev) => setClipEffectStore(prev, clipId, effect));
+  }, []);
+
+  /** Multi-select group ops (Slice 8). */
+  const moveClips = useCallback((ids: string[], deltaMs: number) => {
+    setArrangement((prev) => moveClipsStore(prev, ids, deltaMs));
+  }, []);
+  const removeClips = useCallback((ids: string[]) => {
+    setArrangement((prev) => removeClipsStore(prev, ids));
+  }, []);
+  const duplicateClips = useCallback((specs: { clipId: string; atMs: number }[]) => {
+    setArrangement((prev) => duplicateClipsStore(prev, specs));
   }, []);
 
   /** Transport / grid — tempo + time signature (Slice 7). */
@@ -406,6 +420,9 @@ export function useArrangement() {
     transposeClip,
     trimClip,
     setClipEffect,
+    moveClips,
+    removeClips,
+    duplicateClips,
     setTempo,
     setBeatsPerBar,
     addSection,
