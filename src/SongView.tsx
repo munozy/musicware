@@ -14,8 +14,10 @@ import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
 import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
-import { clipPlayedMs } from "./arrangement";
+import { clipPlayedMs, type Section } from "./arrangement";
 import { gridMsFor, type SnapDivision } from "./timeScale";
+import { suggestForSection, type Suggestion } from "./suggest";
+import { formatDuration } from "./recordings";
 import {
   buildProjectBundle,
   serializeProject,
@@ -45,6 +47,7 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     playStartedAt,
     previewingId,
     placeClip,
+    placeSuggestion,
     moveClip,
     removeClip,
     addTrack,
@@ -141,6 +144,24 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedIds, duplicateSelection, duplicateClip],
+  );
+
+  // ---- "Suggest what fits" (Slice 9): heuristic candidates for a section ----
+  const [suggestState, setSuggestState] = useState<{ section: Section; items: Suggestion[] } | null>(null);
+  const handleSuggestSection = useCallback(
+    (section: Section) => {
+      setSuggestState({ section, items: suggestForSection(section.endMs - section.startMs, recordings) });
+    },
+    [recordings],
+  );
+  const placeSuggested = useCallback(
+    (s: Suggestion) => {
+      if (!suggestState) return;
+      const trackId = arrangement.tracks[0]?.id;
+      if (trackId) placeSuggestion(trackId, s.recording.id, suggestState.section.startMs, s.loopCount);
+      setSuggestState(null);
+    },
+    [suggestState, arrangement, placeSuggestion],
   );
 
   const [exporting, setExporting] = useState(false);
@@ -298,6 +319,33 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
         onSetBeatsPerBar={setBeatsPerBar}
         onSetSnap={setSnap}
       />
+      {suggestState && (
+        <div className="suggest-panel" role="dialog" aria-label="Suggestions">
+          <div className="suggest-head">
+            <span>
+              Suggestions for <b>{suggestState.section.name}</b> (
+              {formatDuration(suggestState.section.endMs - suggestState.section.startMs)})
+            </span>
+            <button className="song-bar-btn" onClick={() => setSuggestState(null)} aria-label="Close suggestions">
+              ×
+            </button>
+          </div>
+          {suggestState.items.length === 0 ? (
+            <p className="suggest-empty">No recordings to suggest yet — record some clips first.</p>
+          ) : (
+            <ul className="suggest-list">
+              {suggestState.items.map((s) => (
+                <li key={s.recording.id}>
+                  <button className="suggest-item" onClick={() => placeSuggested(s)}>
+                    <span className="suggest-name">{s.recording.name}</span>
+                    <span className="suggest-reason">{s.reason}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {liveSelected.length > 0 && (
         <div className="selection-bar" role="group" aria-label="Selection actions">
           <span className="selection-count">{liveSelected.length} selected</span>
@@ -354,6 +402,7 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
             onResizeSection: resizeSection,
             onRemoveSection: removeSection,
             onApplyTemplate: applyTemplate,
+            onSuggestSection: handleSuggestSection,
           }}
         />
       </div>

@@ -15,6 +15,7 @@ const ops = (): SectionOps => ({
   onResizeSection: vi.fn(),
   onRemoveSection: vi.fn(),
   onApplyTemplate: vi.fn(),
+  onSuggestSection: vi.fn(),
 });
 
 describe("SectionBand", () => {
@@ -66,5 +67,11 @@ describe("SectionBand", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /remove section drop/i }));
     expect(o.onRemoveSection).toHaveBeenCalledWith("s2");
+  });
+
+  it("the ✨ button asks for suggestions for that section", () => {
+    render(<SectionBand sections={sections} contentMs={10000} ops={o} />);
+    fireEvent.click(screen.getByRole("button", { name: /suggest clips for intro/i }));
+    expect(o.onSuggestSection).toHaveBeenCalledWith(sections[0]);
   });
 });
