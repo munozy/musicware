@@ -97,6 +97,14 @@ export function useArrangement() {
     setArrangement((prev) => addClip(prev, trackId, recordingId, startMs));
   }, []);
 
+  /** Place a clip pre-looped to fill a section (Slice 9 "Suggest what fits"). */
+  const placeSuggestion = useCallback(
+    (trackId: string, recordingId: string, startMs: number, loopCount: number) => {
+      setArrangement((prev) => addClip(prev, trackId, recordingId, startMs, loopCount));
+    },
+    [],
+  );
+
   /** Move an already-placed clip to a new time (clamped >= 0). The headline edit (US-12). */
   const moveClip = useCallback((clipId: string, startMs: number) => {
     setArrangement((prev) => moveClipStore(prev, clipId, startMs));
@@ -405,6 +413,7 @@ export function useArrangement() {
     playStartedAt,
     previewingId,
     placeClip,
+    placeSuggestion,
     moveClip,
     removeClip,
     addTrack,

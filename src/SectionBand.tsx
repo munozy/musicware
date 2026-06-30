@@ -22,6 +22,7 @@ export type SectionOps = {
   onResizeSection: (id: string, endMs: number) => void;
   onRemoveSection: (id: string) => void;
   onApplyTemplate: (key: string, totalMs: number) => void;
+  onSuggestSection: (section: Section) => void;
 };
 
 type Props = {
@@ -99,6 +100,18 @@ function SectionBlock({ section, ops }: { section: Section; ops: SectionOps }) {
           {section.name}
         </button>
       )}
+      <button
+        className="section-suggest"
+        aria-label={`Suggest clips for ${section.name}`}
+        title="Suggest what fits here"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          ops.onSuggestSection(section);
+        }}
+      >
+        ✨
+      </button>
       <button
         className="section-del"
         aria-label={`Remove section ${section.name}`}

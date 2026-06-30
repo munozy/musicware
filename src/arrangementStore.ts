@@ -74,6 +74,7 @@ export function addClip(
   trackId: string,
   recordingId: string,
   startMs: number,
+  loopCount = 1,
 ): Arrangement {
   const trackIndex = arr.tracks.findIndex((t) => t.id === trackId);
   if (trackIndex === -1) return arr;
@@ -83,7 +84,7 @@ export function addClip(
     recordingId,
     startMs,
     transpose: 0,
-    loopCount: 1,
+    loopCount: Math.max(1, Math.floor(loopCount)),
   };
 
   const updatedTrack: Track = {

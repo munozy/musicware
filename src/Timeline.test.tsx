@@ -113,6 +113,7 @@ describe("Timeline", () => {
           onResizeSection: vi.fn(),
           onRemoveSection: vi.fn(),
           onApplyTemplate: vi.fn(),
+          onSuggestSection: vi.fn(),
         }}
         selection={{ selectedIds, onSelectClip, onClearSelection }}
       />,
