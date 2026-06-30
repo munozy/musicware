@@ -26,6 +26,8 @@ import {
   setClipTranspose as setClipTransposeStore,
   setClipTrim as setClipTrimStore,
   setClipEffect as setClipEffectStore,
+  setTempo as setTempoStore,
+  setBeatsPerBar as setBeatsPerBarStore,
   addSection as addSectionStore,
   renameSection as renameSectionStore,
   moveSection as moveSectionStore,
@@ -152,6 +154,10 @@ export function useArrangement() {
   const setClipEffect = useCallback((clipId: string, effect: VoiceEffect) => {
     setArrangement((prev) => setClipEffectStore(prev, clipId, effect));
   }, []);
+
+  /** Transport / grid — tempo + time signature (Slice 7). */
+  const setTempo = useCallback((bpm: number) => setArrangement((prev) => setTempoStore(prev, bpm)), []);
+  const setBeatsPerBar = useCallback((beats: number) => setArrangement((prev) => setBeatsPerBarStore(prev, beats)), []);
 
   /** Song structure — section markers + genre templates (Slice 6). Visual-only. */
   const addSection = useCallback((startMs: number, endMs: number) => {
@@ -400,6 +406,8 @@ export function useArrangement() {
     transposeClip,
     trimClip,
     setClipEffect,
+    setTempo,
+    setBeatsPerBar,
     addSection,
     renameSection,
     moveSection,

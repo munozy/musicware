@@ -94,6 +94,7 @@ describe("Timeline", () => {
         recordings={recordings}
         isPlaying={false}
         playStartedAt={null}
+        gridMs={100}
         onPlaceClip={onPlaceClip}
         clipOps={{ onMoveClip, onRemoveClip, onToggleClipMute, onDuplicateClip, onSetClipLoop, onTransposeClip, onTrimClip, onSetClipEffect }}
         trackOps={trackOps}

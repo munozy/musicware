@@ -27,6 +27,8 @@ import {
   removeSection,
   applyTemplate,
   SECTION_TEMPLATES,
+  setTempo,
+  setBeatsPerBar,
 } from "./arrangementStore";
 
 describe("arrangementStore — load/save", () => {
@@ -451,5 +453,26 @@ describe("song structure — sections + templates (Slice 6)", () => {
       expect(out.sections[i].startMs).toBe(out.sections[i - 1].endMs);
     }
     expect(applyTemplate(a, "nope", 10_000)).toBe(a);
+  });
+});
+
+describe("transport — tempo + time signature (Slice 7)", () => {
+  it("setTempo clamps to 40–300 and rounds; doesn't touch clips", () => {
+    const a = addClip(newArrangement(), newArrangement().tracks[0].id, "r1", 1000);
+    expect(setTempo(a, 140).tempoBpm).toBe(140);
+    expect(setTempo(a, 5).tempoBpm).toBe(40);
+    expect(setTempo(a, 9999).tempoBpm).toBe(300);
+    expect(setTempo(a, 128.6).tempoBpm).toBe(129);
+    // US-25: tempo change must not move placed clips
+    const before = a.tracks[0].clips[0]?.startMs;
+    const after = setTempo(a, 200).tracks[0].clips[0]?.startMs;
+    expect(after).toBe(before);
+  });
+
+  it("setBeatsPerBar clamps to 1–12 and keeps the /4 denominator", () => {
+    const a = newArrangement();
+    expect(setBeatsPerBar(a, 3).timeSig).toEqual([3, 4]);
+    expect(setBeatsPerBar(a, 0).timeSig).toEqual([1, 4]);
+    expect(setBeatsPerBar(a, 99).timeSig).toEqual([12, 4]);
   });
 });

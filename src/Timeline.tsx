@@ -16,13 +16,12 @@
 import { useRef, useState } from "react";
 import { arrangementContentMs, clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
 import { isVoice, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
-import { pxToMs, msToPx, snapMs, PX_PER_MS } from "./timeScale";
+import { pxToMs, msToPx, snapMs, beatMs, PX_PER_MS } from "./timeScale";
 import TrackHeader from "./TrackHeader";
 import SectionBand, { type SectionOps } from "./SectionBand";
 import Playhead from "./Playhead";
 
-const SNAP_MS = 100;
-const RULER_TICK_MS = 1000;
+const SNAP_MS = 100; // fallback keyboard-nudge step when snapping is off
 const RULER_WIDTH_MS = 30_000; // show 30 seconds of ruler
 const MIN_CLIP_PX = 4;
 
@@ -44,6 +43,7 @@ type Props = {
   recordings: Recording[];
   isPlaying: boolean;
   playStartedAt: number | null;
+  gridMs: number; // snap step from the transport (0 = free placement)
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   clipOps: ClipOps;
   trackOps: TrackOps;
@@ -74,7 +74,9 @@ function ClipBlock({
   onTransposeClip,
   onTrimClip,
   onSetClipEffect,
-}: { clip: ClipInstance; recordings: Recording[] } & ClipOps) {
+  gridMs,
+}: { clip: ClipInstance; recordings: Recording[]; gridMs: number } & ClipOps) {
+  const nudgeMs = gridMs > 0 ? gridMs : SNAP_MS; // keyboard ←/→ step (a grid step, or 100ms when snap off)
   const rec = recordings.find((r) => r.id === clip.recordingId);
   const name = rec?.name ?? clip.recordingId;
   const loops = Math.max(1, Math.floor(clip.loopCount || 1));
@@ -119,10 +121,10 @@ function ClipBlock({
     const onMove = (ev: PointerEvent) => {
       const deltaMs = pxToMs(ev.clientX - startX, PX_PER_MS);
       if (edge === "end") {
-        const newWe = Math.min(rec.durationMs, Math.max(origWs + MIN_WINDOW_MS, snapMs(origWe + deltaMs, SNAP_MS)));
+        const newWe = Math.min(rec.durationMs, Math.max(origWs + MIN_WINDOW_MS, snapMs(origWe + deltaMs, gridMs)));
         onTrimClip(clip.id, { trimEndMs: newWe });
       } else {
-        const newWs = Math.max(0, Math.min(origWe - MIN_WINDOW_MS, snapMs(origWs + deltaMs, SNAP_MS)));
+        const newWs = Math.max(0, Math.min(origWe - MIN_WINDOW_MS, snapMs(origWs + deltaMs, gridMs)));
         onTrimClip(clip.id, { trimStartMs: newWs, startMs: Math.max(0, origStartMs + (newWs - origWs)) });
       }
     };
@@ -138,10 +140,10 @@ function ClipBlock({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowLeft") {
       e.preventDefault();
-      onMoveClip(clip.id, clip.startMs - SNAP_MS); // store clamps >= 0
+      onMoveClip(clip.id, clip.startMs - nudgeMs); // store clamps >= 0
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
-      onMoveClip(clip.id, clip.startMs + SNAP_MS);
+      onMoveClip(clip.id, clip.startMs + nudgeMs);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       onTransposeClip(clip.id, transpose + 1); // store clamps to ±MAX_TRANSPOSE
@@ -332,12 +334,14 @@ function TrackLane({
   trackId,
   clips,
   recordings,
+  gridMs,
   onPlaceClip,
   clipOps,
 }: {
   trackId: string;
   clips: ClipInstance[];
   recordings: Recording[];
+  gridMs: number;
   onPlaceClip: (trackId: string, recordingId: string, startMs: number) => void;
   clipOps: ClipOps;
 }) {
@@ -362,14 +366,14 @@ function TrackLane({
     if (payload.startsWith("clip:")) {
       const recordingId = payload.slice("clip:".length);
       const offsetPx = Math.min(Math.max(0, e.clientX - laneLeft), laneWidth);
-      onPlaceClip(trackId, recordingId, snapMs(pxToMs(offsetPx, PX_PER_MS), SNAP_MS));
+      onPlaceClip(trackId, recordingId, snapMs(pxToMs(offsetPx, PX_PER_MS), gridMs));
     } else if (payload.startsWith("move:")) {
       const rest = payload.slice("move:".length);
       const sep = rest.lastIndexOf(":");
       const clipId = sep >= 0 ? rest.slice(0, sep) : rest;
       const grabOffsetPx = sep >= 0 ? Number(rest.slice(sep + 1)) || 0 : 0;
       const leftPx = Math.min(Math.max(0, e.clientX - laneLeft - grabOffsetPx), laneWidth);
-      clipOps.onMoveClip(clipId, snapMs(pxToMs(leftPx, PX_PER_MS), SNAP_MS));
+      clipOps.onMoveClip(clipId, snapMs(pxToMs(leftPx, PX_PER_MS), gridMs));
     }
   };
 
@@ -382,20 +386,22 @@ function TrackLane({
       onDrop={handleDrop}
     >
       {clips.map((clip) => (
-        <ClipBlock key={clip.id} clip={clip} recordings={recordings} {...clipOps} />
+        <ClipBlock key={clip.id} clip={clip} recordings={recordings} gridMs={gridMs} {...clipOps} />
       ))}
     </div>
   );
 }
 
-function Ruler() {
+function Ruler({ bpm, beatsPerBar }: { bpm: number; beatsPerBar: number }) {
+  const beat = beatMs(bpm);
+  const totalBeats = Math.floor(RULER_WIDTH_MS / beat);
   const ticks = [];
-  for (let ms = 0; ms <= RULER_WIDTH_MS; ms += RULER_TICK_MS) {
-    const px = msToPx(ms, PX_PER_MS);
-    const label = ms === 0 ? "0" : `${ms / 1000}s`;
+  for (let b = 0; b <= totalBeats; b++) {
+    const px = msToPx(b * beat, PX_PER_MS);
+    const isBar = b % beatsPerBar === 0;
     ticks.push(
-      <div key={ms} className="ruler-tick" style={{ left: px }}>
-        <span className="ruler-label">{label}</span>
+      <div key={b} className={`ruler-tick${isBar ? " bar" : ""}`} style={{ left: px }}>
+        {isBar && <span className="ruler-label">{Math.floor(b / beatsPerBar) + 1}</span>}
       </div>,
     );
   }
@@ -407,6 +413,7 @@ export default function Timeline({
   recordings,
   isPlaying,
   playStartedAt,
+  gridMs,
   onPlaceClip,
   clipOps,
   trackOps,
@@ -414,7 +421,7 @@ export default function Timeline({
 }: Props) {
   return (
     <div className="timeline" role="region" aria-label="Timeline">
-      <Ruler />
+      <Ruler bpm={arrangement.tempoBpm} beatsPerBar={arrangement.timeSig?.[0] ?? 4} />
       <SectionBand
         sections={arrangement.sections}
         contentMs={arrangementContentMs(arrangement, recordings)}
@@ -438,6 +445,7 @@ export default function Timeline({
               trackId={track.id}
               clips={track.clips}
               recordings={recordings}
+              gridMs={gridMs}
               onPlaceClip={onPlaceClip}
               clipOps={clipOps}
             />

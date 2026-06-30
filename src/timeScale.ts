@@ -33,3 +33,31 @@ export function snapMs(ms: number, gridMs: number): number {
   if (gridMs <= 0) return ms;
   return Math.round(ms / gridMs) * gridMs;
 }
+
+// ---- Musical grid (Slice 7): tempo-derived bar/beat divisions ----
+
+export type SnapDivision = "off" | "bar" | "beat" | "half";
+
+/** Milliseconds per beat at the given tempo (bpm clamped to >= 1). */
+export function beatMs(bpm: number): number {
+  return 60000 / Math.max(1, bpm);
+}
+
+/** Milliseconds per bar = beat × beats-per-bar. */
+export function barMs(bpm: number, beatsPerBar: number): number {
+  return beatMs(bpm) * Math.max(1, beatsPerBar);
+}
+
+/** The snap step (ms) for a division at a tempo; 0 means no snap (free placement). */
+export function gridMsFor(division: SnapDivision, bpm: number, beatsPerBar: number): number {
+  switch (division) {
+    case "bar":
+      return barMs(bpm, beatsPerBar);
+    case "beat":
+      return beatMs(bpm);
+    case "half":
+      return beatMs(bpm) / 2;
+    default:
+      return 0;
+  }
+}
