@@ -6,9 +6,26 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 import { invoke } from "@tauri-apps/api/core";
 
+// Voice-blob cleanup (DEBT-034): stub the IndexedDB + decoded-buffer stores so we can assert the
+// finalize path frees them without a real IndexedDB/AudioContext in jsdom.
+vi.mock("./voiceStore", () => ({ deleteBlob: vi.fn(() => Promise.resolve()) }));
+vi.mock("./voiceAudio", () => ({ clearVoiceBuffer: vi.fn() }));
+import { deleteBlob } from "./voiceStore";
+import { clearVoiceBuffer } from "./voiceAudio";
+
 import { useRecorder, UNDO_MS } from "./useRecorder";
 import * as synth from "./synth";
-import { loadRecordings } from "./recordings";
+import { loadRecordings, type Recording } from "./recordings";
+
+const voiceTake = (id: string, blobKey: string): Recording => ({
+  id,
+  name: id,
+  createdAt: 0,
+  durationMs: 1000,
+  kind: "voice",
+  events: [],
+  audio: { blobKey, mimeType: "audio/webm", effect: "none" },
+});
 
 const calls = () => vi.mocked(invoke).mock.calls.map((c) => [c[0], c[1]]);
 
@@ -26,6 +43,8 @@ beforeEach(() => {
   synth.setSynthSink(null);
   synth.emit({ kind: "preset", index: 0 }); // reset the module's current preset
   vi.mocked(invoke).mockClear();
+  vi.mocked(deleteBlob).mockClear();
+  vi.mocked(clearVoiceBuffer).mockClear();
 });
 
 afterEach(() => {
@@ -323,5 +342,56 @@ describe("useRecorder — rename / delete / persistence", () => {
     expect(loadRecordings().map((r) => r.id)).toEqual(["i1", "i2"]); // persisted
     act(() => result.current.addRecordings([])); // no-op
     expect(result.current.recordings).toHaveLength(2);
+  });
+});
+
+describe("useRecorder — voice-take blob cleanup (DEBT-034)", () => {
+  it("frees the IndexedDB blob + decoded buffer when a voice delete becomes FINAL (undo window elapses)", () => {
+    localStorage.setItem("musicware.recordings.v1", JSON.stringify([voiceTake("v1", "blob-v1")]));
+    const { result } = renderHook(() => useRecorder());
+
+    act(() => result.current.remove("v1"));
+    expect(deleteBlob).not.toHaveBeenCalled(); // still undoable → blob preserved
+
+    act(() => vi.advanceTimersByTime(UNDO_MS + 1));
+    expect(deleteBlob).toHaveBeenCalledWith("blob-v1");
+    expect(clearVoiceBuffer).toHaveBeenCalledWith("blob-v1");
+  });
+
+  it("does NOT free the blob when the delete is UNDONE", () => {
+    localStorage.setItem("musicware.recordings.v1", JSON.stringify([voiceTake("v1", "blob-v1")]));
+    const { result } = renderHook(() => useRecorder());
+
+    act(() => result.current.remove("v1"));
+    act(() => result.current.undoDelete());
+    act(() => vi.advanceTimersByTime(UNDO_MS + 1)); // window would have elapsed, but it's restored
+
+    expect(deleteBlob).not.toHaveBeenCalled();
+    expect(result.current.recordings.map((r) => r.id)).toEqual(["v1"]);
+  });
+
+  it("finalizes a superseded pending delete (a second delete makes the first permanent)", () => {
+    localStorage.setItem(
+      "musicware.recordings.v1",
+      JSON.stringify([voiceTake("v1", "blob-v1"), voiceTake("v2", "blob-v2")]),
+    );
+    const { result } = renderHook(() => useRecorder());
+
+    act(() => result.current.remove("v1"));
+    act(() => result.current.remove("v2")); // supersedes v1's pending delete → v1 is now final
+    expect(deleteBlob).toHaveBeenCalledWith("blob-v1");
+    expect(deleteBlob).not.toHaveBeenCalledWith("blob-v2"); // v2 still undoable
+
+    act(() => vi.advanceTimersByTime(UNDO_MS + 1));
+    expect(deleteBlob).toHaveBeenCalledWith("blob-v2");
+  });
+
+  it("keyboard takes never touch the blob store", () => {
+    const { result } = renderHook(() => useRecorder());
+    act(() => result.current.addRecording({ id: "k1", name: "k1", createdAt: 0, durationMs: 100, events: [] }));
+    act(() => result.current.remove("k1"));
+    act(() => vi.advanceTimersByTime(UNDO_MS + 1));
+    expect(deleteBlob).not.toHaveBeenCalled();
+    expect(clearVoiceBuffer).not.toHaveBeenCalled();
   });
 });

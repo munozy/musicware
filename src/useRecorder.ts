@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emit, getCurrentPreset, setSynthSink, type SynthEvent } from "./synth";
 import {
+  isVoice,
   loadRecordings,
   newId,
   nextName,
@@ -9,6 +10,8 @@ import {
   type Recording,
   type VoiceEffect,
 } from "./recordings";
+import { deleteBlob } from "./voiceStore";
+import { clearVoiceBuffer } from "./voiceAudio";
 
 /** How long a deleted take can be undone before the removal is final. */
 export const UNDO_MS = 5000;
@@ -30,6 +33,22 @@ export function useRecorder() {
   // The most recent delete, kept for a short undo window (null = nothing to undo).
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref mirror of the pending delete so remove()/unmount can FINALIZE a superseded one without
+  // depending on the (possibly stale) state closure.
+  const pendingDeleteRef = useRef<PendingDelete | null>(null);
+
+  // A delete has become permanent (undo window elapsed or superseded) — free the take's audio
+  // blob + decoded-buffer cache (DEBT-034: these were never released, leaking IndexedDB + PCM
+  // for the life of the install). No-op for keyboard takes. Called only on FINAL removal, never
+  // on undo, so an undone take keeps its blob.
+  const finalizeDelete = useCallback((rec: Recording) => {
+    if (isVoice(rec) && rec.audio) {
+      clearVoiceBuffer(rec.audio.blobKey);
+      void deleteBlob(rec.audio.blobKey).catch(() => {
+        /* best-effort; a failed blob delete only leaks storage, never corrupts the library */
+      });
+    }
+  }, []);
 
   // Recording scratch state.
   const t0Ref = useRef(0);
@@ -198,14 +217,19 @@ export function useRecorder() {
       const recording = recordings[index];
       if (playingId === id) stopPlayback();
       if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      // A still-pending delete is now superseded (only one undo slot) → make it final + free it.
+      if (pendingDeleteRef.current) finalizeDelete(pendingDeleteRef.current.recording);
+      pendingDeleteRef.current = { recording, index };
       setPendingDelete({ recording, index });
       setRecordings((list) => list.filter((r) => r.id !== id));
       undoTimerRef.current = setTimeout(() => {
+        finalizeDelete(recording); // undo window elapsed → free the blob + decoded-buffer cache
+        pendingDeleteRef.current = null;
         setPendingDelete(null);
         undoTimerRef.current = null;
       }, UNDO_MS);
     },
-    [recordings, playingId, stopPlayback],
+    [recordings, playingId, stopPlayback, finalizeDelete],
   );
 
   const undoDelete = useCallback(() => {
@@ -220,6 +244,7 @@ export function useRecorder() {
       next.splice(Math.min(index, next.length), 0, recording); // restore at its old spot
       return next;
     });
+    pendingDeleteRef.current = null; // restored → do NOT free its blob
     setPendingDelete(null);
   }, [pendingDelete]);
 
@@ -231,9 +256,12 @@ export function useRecorder() {
       clearPlayback();
       if (tickRef.current) clearInterval(tickRef.current);
       if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      // A delete pending at unmount is already gone from storage (undo is in-memory only) → its
+      // blob would otherwise orphan. Free it.
+      if (pendingDeleteRef.current) finalizeDelete(pendingDeleteRef.current.recording);
       setSynthSink(null);
     };
-  }, [clearPlayback]);
+  }, [clearPlayback, finalizeDelete]);
 
   return {
     recordings,
