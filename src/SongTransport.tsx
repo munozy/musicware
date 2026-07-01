@@ -4,7 +4,7 @@
  * snap to. Changing tempo re-grids the ruler but does NOT move already-placed clips (US-25).
  */
 
-import type { Recording } from "./recordings";
+import { formatDuration, type Recording } from "./recordings";
 import type { SnapDivision } from "./timeScale";
 
 type Props = {
@@ -18,6 +18,13 @@ type Props = {
   onSetTempo: (bpm: number) => void;
   onSetBeatsPerBar: (beats: number) => void;
   onSetSnap: (d: SnapDivision) => void;
+  // Seek + loop-region (Slice 7b)
+  seekMs: number;
+  loopRegion: { startMs: number; endMs: number } | null;
+  loopEnabled: boolean;
+  onToggleLoop: () => void;
+  onClearSeek: () => void;
+  onClearLoop: () => void;
 };
 
 const SNAP_OPTIONS: { value: SnapDivision; label: string }[] = [
@@ -38,7 +45,14 @@ export default function SongTransport({
   onSetTempo,
   onSetBeatsPerBar,
   onSetSnap,
+  seekMs,
+  loopRegion,
+  loopEnabled,
+  onToggleLoop,
+  onClearSeek,
+  onClearLoop,
 }: Props) {
+  const looping = loopEnabled && loopRegion != null && loopRegion.endMs > loopRegion.startMs;
   return (
     <div className="song-transport" role="group" aria-label="Song transport">
       <button
@@ -52,9 +66,41 @@ export default function SongTransport({
       <button className="song-transport-btn" aria-label="Stop" onClick={onStop} disabled={!isPlaying}>
         ■
       </button>
+      <button
+        className={`song-transport-btn loop-toggle${looping ? " active" : ""}`}
+        aria-label="Loop region"
+        aria-pressed={looping}
+        title={
+          loopRegion
+            ? "Loop the region (drag on the ruler to set it)"
+            : "Drag on the ruler to set a loop region first"
+        }
+        disabled={!loopRegion}
+        onClick={onToggleLoop}
+      >
+        🔁
+      </button>
       <span className="song-transport-status" aria-live="polite">
         {isPlaying ? "Playing" : "Stopped"}
       </span>
+
+      {looping ? (
+        <span className="transport-region" title="Loop region — Play repeats this window">
+          🔁 {formatDuration(loopRegion!.startMs)}–{formatDuration(loopRegion!.endMs)}
+          <button className="transport-region-clear" aria-label="Clear loop region" onClick={onClearLoop}>
+            ×
+          </button>
+        </span>
+      ) : (
+        seekMs > 0 && (
+          <span className="transport-region" title="Play starts from here — click the ruler to move it">
+            ↦ {formatDuration(seekMs)}
+            <button className="transport-region-clear" aria-label="Clear seek" onClick={onClearSeek}>
+              ×
+            </button>
+          </span>
+        )
+      )}
 
       <span className="transport-grid" title="Tempo re-grids the timeline; it doesn't move clips already placed.">
         <label className="transport-field">

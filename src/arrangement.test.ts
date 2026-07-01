@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   flattenArrangement,
+  buildPlaybackStream,
   playArrangement,
   pendingNotesAfter,
   clipWindow,
@@ -554,5 +555,74 @@ describe("voiceClipPlays — the audio (voice) playback pass (ADR-0009)", () => 
       track({ id: "t3", clips: [clip({ recordingId: "c" })] }),
     ]);
     expect(voiceClipPlays(soloed, recs).map((p) => p.recordingId)).toEqual(["b"]); // only soloed plays
+  });
+});
+
+describe("buildPlaybackStream — seek + loop (Slice 7b)", () => {
+  // A two-note stream: 60 sounds 0–1000, 62 sounds 2000–3000.
+  const base: ScheduledEvent[] = [
+    { t: 0, kind: "on", note: 60 },
+    { t: 1000, kind: "off", note: 60 },
+    { t: 2000, kind: "on", note: 62 },
+    { t: 3000, kind: "off", note: 62 },
+  ];
+
+  it("seek=0 / no loop returns the stream unchanged (identity)", () => {
+    expect(buildPlaybackStream(base, {})).toBe(base);
+    expect(buildPlaybackStream(base, { seekMs: 0 })).toBe(base);
+  });
+
+  it("seek drops earlier events and shifts the rest so playback starts at 0", () => {
+    const out = buildPlaybackStream(base, { seekMs: 2000 });
+    expect(out).toEqual([
+      { t: 0, kind: "on", note: 62 },
+      { t: 1000, kind: "off", note: 62 },
+    ]);
+    expect(stranded(out)).toEqual(new Set()); // nothing left hanging
+  });
+
+  it("seek landing mid-note keeps the trailing off but drops the (earlier) on", () => {
+    const out = buildPlaybackStream(base, { seekMs: 500 });
+    // 60's `on` was before the seek; only its `off` survives (documented same-pitch family).
+    expect(out[0]).toEqual({ t: 500, kind: "off", note: 60 });
+    expect(out.some((e) => e.kind === "on" && e.note === 62)).toBe(true);
+  });
+
+  it("loop repeats the [a,b) window `cycles` times, shifted to start at 0", () => {
+    const out = buildPlaybackStream(base, { loop: { startMs: 0, endMs: 2000, cycles: 2 } });
+    // window [0,2000) holds 60's on@0 + off@1000; repeated at +0 and +2000.
+    expect(out).toEqual([
+      { t: 0, kind: "on", note: 60 },
+      { t: 1000, kind: "off", note: 60 },
+      { t: 2000, kind: "on", note: 60 },
+      { t: 3000, kind: "off", note: 60 },
+    ]);
+    expect(stranded(out)).toEqual(new Set());
+  });
+
+  it("force-closes a note still held at the loop boundary (no stacking across cycles)", () => {
+    // 60 turns on at 500 but its off (1000) is OUTSIDE the [0,800) window — the boundary closes it.
+    const held: ScheduledEvent[] = [
+      { t: 500, kind: "on", note: 60 },
+      { t: 1000, kind: "off", note: 60 },
+    ];
+    const out = buildPlaybackStream(held, { loop: { startMs: 0, endMs: 800, cycles: 2 } });
+    expect(out).toEqual([
+      { t: 500, kind: "on", note: 60 },
+      { t: 800, kind: "off", note: 60 }, // boundary close, cycle 1
+      { t: 1300, kind: "on", note: 60 },
+      { t: 1600, kind: "off", note: 60 }, // boundary close, cycle 2
+    ]);
+    expect(stranded(out)).toEqual(new Set()); // never leaves a stuck note
+  });
+
+  it("loop takes precedence over seek, and a zero-width region falls through to seek", () => {
+    const looped = buildPlaybackStream(base, { seekMs: 9999, loop: { startMs: 0, endMs: 1000, cycles: 1 } });
+    expect(looped).toEqual([
+      { t: 0, kind: "on", note: 60 },
+      { t: 1000, kind: "off", note: 60 },
+    ]);
+    // endMs<=startMs is not a real region → behaves like the seek branch (here seek 0 = identity).
+    expect(buildPlaybackStream(base, { loop: { startMs: 1000, endMs: 1000, cycles: 3 } })).toBe(base);
   });
 });

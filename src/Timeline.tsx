@@ -49,6 +49,14 @@ type Props = {
   trackOps: TrackOps;
   sectionOps: SectionOps;
   selection: Selection;
+  // Seek + loop-region (Slice 7b)
+  seekMs: number;
+  loopRegion: { startMs: number; endMs: number } | null;
+  loopEnabled: boolean;
+  playOriginMs: number;
+  playLoopLenMs: number;
+  onSeek: (ms: number) => void;
+  onSetLoopRegion: (region: { startMs: number; endMs: number } | null) => void;
 };
 
 type ClipOps = {
@@ -422,7 +430,31 @@ function TrackLane({
   );
 }
 
-function Ruler({ bpm, beatsPerBar }: { bpm: number; beatsPerBar: number }) {
+/**
+ * The ruler doubles as the seek/loop control (Slice 7b): a plain click sets the play-from
+ * position; a drag defines a loop region. Both snap to the active grid. Endpoints map px→ms
+ * the same way clip drops do (the ruler box is offset by LANE_ORIGIN in CSS, so its own
+ * bounding-rect left is the t=0 origin).
+ */
+function Ruler({
+  bpm,
+  beatsPerBar,
+  gridMs,
+  seekMs,
+  loopRegion,
+  looping,
+  onSeek,
+  onSetLoopRegion,
+}: {
+  bpm: number;
+  beatsPerBar: number;
+  gridMs: number;
+  seekMs: number;
+  loopRegion: { startMs: number; endMs: number } | null;
+  looping: boolean;
+  onSeek: (ms: number) => void;
+  onSetLoopRegion: (region: { startMs: number; endMs: number } | null) => void;
+}) {
   const beat = beatMs(bpm);
   const totalBeats = Math.floor(RULER_WIDTH_MS / beat);
   const ticks = [];
@@ -435,7 +467,68 @@ function Ruler({ bpm, beatsPerBar }: { bpm: number; beatsPerBar: number }) {
       </div>,
     );
   }
-  return <div className="timeline-ruler">{ticks}</div>;
+
+  const rulerRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<{ a: number; b: number } | null>(null);
+
+  const msAt = (clientX: number): number => {
+    const rect = rulerRef.current?.getBoundingClientRect();
+    const offsetPx = Math.max(0, Math.min(clientX - (rect ? rect.left : 0), msToPx(RULER_WIDTH_MS, PX_PER_MS)));
+    return Math.max(0, snapMs(pxToMs(offsetPx, PX_PER_MS), gridMs));
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const downX = e.clientX;
+    const startMs = msAt(downX);
+    let moved = false;
+    const onMove = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - downX) >= 4) moved = true; // px threshold: distinguish click from drag
+      if (moved) setDrag({ a: startMs, b: msAt(ev.clientX) });
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const endMs = msAt(ev.clientX);
+      if (moved && Math.abs(endMs - startMs) > 0) {
+        onSetLoopRegion({ startMs: Math.min(startMs, endMs), endMs: Math.max(startMs, endMs) });
+      } else {
+        onSeek(startMs); // a click (no real drag) seeks
+      }
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const region = drag ? { startMs: Math.min(drag.a, drag.b), endMs: Math.max(drag.a, drag.b) } : loopRegion;
+
+  return (
+    <div
+      ref={rulerRef}
+      className="timeline-ruler"
+      role="slider"
+      aria-label="Playback ruler — click to set the start position, drag to set a loop region"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(RULER_WIDTH_MS)}
+      aria-valuenow={Math.round(seekMs)}
+      title="Click to set where Play starts · drag to set a loop region"
+      onPointerDown={handlePointerDown}
+    >
+      {ticks}
+      {region && (
+        <div
+          className={`ruler-loop-region${looping && !drag ? " active" : ""}`}
+          style={{ left: msToPx(region.startMs, PX_PER_MS), width: msToPx(region.endMs - region.startMs, PX_PER_MS) }}
+          aria-hidden="true"
+        />
+      )}
+      {!looping && seekMs > 0 && (
+        <div className="ruler-seek-marker" style={{ left: msToPx(seekMs, PX_PER_MS) }} aria-hidden="true" />
+      )}
+    </div>
+  );
 }
 
 export default function Timeline({
@@ -449,10 +542,31 @@ export default function Timeline({
   trackOps,
   sectionOps,
   selection,
+  seekMs,
+  loopRegion,
+  loopEnabled,
+  playOriginMs,
+  playLoopLenMs,
+  onSeek,
+  onSetLoopRegion,
 }: Props) {
+  const looping = loopEnabled && loopRegion != null && loopRegion.endMs > loopRegion.startMs;
+  // Playhead geometry: while playing use the run's captured origin/loop-length; stopped, park
+  // at where Play would begin (loop start when armed, else the seek position).
+  const playheadOrigin = isPlaying ? playOriginMs : looping ? loopRegion!.startMs : seekMs;
+  const playheadLoopLen = isPlaying ? playLoopLenMs : 0;
   return (
     <div className="timeline" role="region" aria-label="Timeline">
-      <Ruler bpm={arrangement.tempoBpm} beatsPerBar={arrangement.timeSig?.[0] ?? 4} />
+      <Ruler
+        bpm={arrangement.tempoBpm}
+        beatsPerBar={arrangement.timeSig?.[0] ?? 4}
+        gridMs={gridMs}
+        seekMs={seekMs}
+        loopRegion={loopRegion}
+        looping={looping}
+        onSeek={onSeek}
+        onSetLoopRegion={onSetLoopRegion}
+      />
       <SectionBand
         sections={arrangement.sections}
         contentMs={arrangementContentMs(arrangement, recordings)}
@@ -487,7 +601,12 @@ export default function Timeline({
       <button className="timeline-add-track" onClick={trackOps.onAddTrack}>
         + Add track
       </button>
-      <Playhead isPlaying={isPlaying} playStartedAt={playStartedAt} />
+      <Playhead
+        isPlaying={isPlaying}
+        playStartedAt={playStartedAt}
+        originMs={playheadOrigin}
+        loopLenMs={playheadLoopLen}
+      />
     </div>
   );
 }

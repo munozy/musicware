@@ -13,6 +13,12 @@ const baseProps = () => ({
   onSetTempo: vi.fn(),
   onSetBeatsPerBar: vi.fn(),
   onSetSnap: vi.fn(),
+  seekMs: 0,
+  loopRegion: null,
+  loopEnabled: false,
+  onToggleLoop: vi.fn(),
+  onClearSeek: vi.fn(),
+  onClearLoop: vi.fn(),
 });
 
 describe("SongTransport — grid controls (Slice 7)", () => {

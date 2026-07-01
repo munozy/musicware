@@ -284,6 +284,44 @@ export function voiceClipPlays(
   return plays;
 }
 
+export type LoopRegion = { startMs: number; endMs: number; cycles: number };
+
+/**
+ * Transform a flattened stream for playback (Slice 7 seek / loop-region). PURE.
+ *  - LOOP [a,b): repeat the window's events `cycles` times, shifted so the region starts at 0;
+ *    any note still held at a cycle boundary is force-closed there, so looping never stacks a
+ *    stuck note (the same no-stranded-note guarantee as flattenClip's per-window self-close).
+ *  - SEEK to `seekMs` (no loop): drop events before it and shift the rest to start at 0.
+ * Notes whose `on` was dropped (before the seek/loop window) may leave a bare `off` — the same
+ * documented same-pitch family as flattenArrangement; harmless to the no-stranded invariant.
+ */
+export function buildPlaybackStream(
+  events: ScheduledEvent[],
+  opts: { seekMs?: number; loop?: LoopRegion | null },
+): ScheduledEvent[] {
+  const loop = opts.loop ?? null;
+  if (loop && loop.endMs - loop.startMs > 0) {
+    const { startMs: a, endMs: b } = loop;
+    const len = b - a;
+    const window = events.filter((e) => e.t >= a && e.t < b).map((e) => ({ ...e, t: e.t - a }));
+    const out: ScheduledEvent[] = [];
+    for (let k = 0; k < Math.max(1, Math.floor(loop.cycles)); k++) {
+      const base = k * len;
+      const active = new Set<number>();
+      for (const e of window) {
+        out.push({ ...e, t: e.t + base });
+        if (e.kind === "on") active.add(e.note);
+        else if (e.kind === "off") active.delete(e.note);
+      }
+      for (const note of active) out.push({ t: base + len, kind: "off", note });
+    }
+    return out;
+  }
+  const seek = Math.max(0, opts.seekMs ?? 0);
+  if (seek <= 0) return events;
+  return events.filter((e) => e.t >= seek).map((e) => ({ ...e, t: e.t - seek }));
+}
+
 /**
  * The notes left sounding after dispatching every event up to and including `untilT`
  * (default: the whole stream). A correct, fully-played stream returns an empty set —
