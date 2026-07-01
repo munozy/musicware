@@ -13,6 +13,7 @@ import ModeToggle, { type AppMode } from "./ModeToggle";
 import SongView from "./SongView";
 import VoiceView from "./VoiceView";
 import VideoView from "./VideoView";
+import StorageBanner from "./StorageBanner";
 import { useRecorder } from "./useRecorder";
 import { useVoiceRecorder } from "./useVoiceRecorder";
 import { useVisualizerStyle } from "./useVisualizerStyle";
@@ -74,6 +75,8 @@ function App() {
           <VolumeControl />
         </div>
       </header>
+
+      <StorageBanner />
 
       {mode === "play" && (
         <>
