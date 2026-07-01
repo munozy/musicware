@@ -44,6 +44,10 @@ const withClip = (startMs: number, extra: Partial<ClipInstance> = {}) => {
 
 describe("Timeline", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onSeek: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onSetLoopRegion: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onPlaceClip: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let onMoveClip: any;
@@ -71,6 +75,8 @@ describe("Timeline", () => {
   let trackOps: TrackOps;
 
   beforeEach(() => {
+    onSeek = vi.fn();
+    onSetLoopRegion = vi.fn();
     onPlaceClip = vi.fn();
     onSelectClip = vi.fn();
     onClearSelection = vi.fn();
@@ -95,7 +101,8 @@ describe("Timeline", () => {
     };
   });
 
-  const renderTL = (arr: Arrangement, recordings: Recording[] = []) =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderTL = (arr: Arrangement, recordings: Recording[] = [], extra: any = {}) =>
     render(
       <Timeline
         arrangement={arr}
@@ -121,8 +128,9 @@ describe("Timeline", () => {
         loopEnabled={false}
         playOriginMs={0}
         playLoopLenMs={0}
-        onSeek={vi.fn()}
-        onSetLoopRegion={vi.fn()}
+        onSeek={onSeek}
+        onSetLoopRegion={onSetLoopRegion}
+        {...extra}
       />,
     );
 
@@ -357,5 +365,38 @@ describe("Timeline", () => {
     const { container: c2 } = renderTL(edited.arr, [makeRec("r1")]);
     expect(c2.querySelector(".clip-badge-loop")?.textContent).toBe("×2");
     expect(c2.querySelector(".clip-badge-transpose")?.textContent).toBe("+3");
+  });
+
+  // --- Ruler keyboard operability (DEBT-034 a11y high) ---
+  describe("ruler is keyboard-operable (role=slider is honest)", () => {
+    const ruler = () => screen.getByRole("slider");
+
+    it("is focusable and exposes the seek as the slider value", () => {
+      renderTL(newArrangement(), [], { seekMs: 2000 });
+      const el = ruler();
+      expect(el.getAttribute("tabindex")).toBe("0");
+      expect(el.getAttribute("aria-valuenow")).toBe("2000");
+    });
+
+    it("Arrow keys seek by one grid step; Home resets to 0", () => {
+      renderTL(newArrangement(), [], { seekMs: 1000, gridMs: 100 });
+      fireEvent.keyDown(ruler(), { key: "ArrowRight" });
+      expect(onSeek).toHaveBeenCalledWith(1100);
+      fireEvent.keyDown(ruler(), { key: "ArrowLeft" });
+      expect(onSeek).toHaveBeenCalledWith(900);
+      fireEvent.keyDown(ruler(), { key: "Home" });
+      expect(onSeek).toHaveBeenCalledWith(0);
+    });
+
+    it("Shift+Arrow defines a loop region anchored at the seek; Escape clears it", () => {
+      renderTL(newArrangement(), [], { seekMs: 1000, gridMs: 100, loopRegion: null });
+      fireEvent.keyDown(ruler(), { key: "ArrowRight", shiftKey: true });
+      expect(onSetLoopRegion).toHaveBeenCalledWith({ startMs: 1000, endMs: 1100 });
+
+      onSetLoopRegion.mockClear();
+      renderTL(newArrangement(), [], { seekMs: 1000, gridMs: 100, loopRegion: { startMs: 1000, endMs: 1400 }, loopEnabled: true });
+      fireEvent.keyDown(screen.getAllByRole("slider")[1], { key: "Escape" });
+      expect(onSetLoopRegion).toHaveBeenCalledWith(null);
+    });
   });
 });

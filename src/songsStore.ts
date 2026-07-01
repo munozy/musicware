@@ -8,6 +8,7 @@
 
 import type { Arrangement } from "./arrangement";
 import { newArrangement } from "./arrangementStore";
+import { reportPersist } from "./persistHealth";
 
 const SONGS_KEY = "musicware.songs.v1";
 const ACTIVE_KEY = "musicware.activeSong.v1";
@@ -89,7 +90,9 @@ export function saveSongs(songs: Arrangement[], activeId: string): void {
   try {
     localStorage.setItem(SONGS_KEY, JSON.stringify(songs));
     localStorage.setItem(ACTIVE_KEY, activeId);
+    reportPersist(true);
   } catch (e) {
     console.error("failed to persist songs", e);
+    reportPersist(false); // surface it — a silent quota failure loses the user's songs
   }
 }

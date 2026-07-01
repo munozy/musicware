@@ -6,6 +6,7 @@
  */
 
 import { newId } from "./recordings";
+import { reportPersist } from "./persistHealth";
 
 const PROJECTS_KEY = "musicware.videoprojects.v1";
 const ACTIVE_KEY = "musicware.activeVideo.v1";
@@ -128,7 +129,9 @@ export function saveVideoProjects(projects: VideoProject[], activeId: string): v
   try {
     localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
     localStorage.setItem(ACTIVE_KEY, activeId);
+    reportPersist(true);
   } catch (e) {
     console.error("failed to persist video projects", e);
+    reportPersist(false); // surface it — a silent quota failure loses the user's video projects
   }
 }

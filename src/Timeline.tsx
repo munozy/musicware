@@ -507,17 +507,53 @@ function Ruler({
 
   const region = drag ? { startMs: Math.min(drag.a, drag.b), endMs: Math.max(drag.a, drag.b) } : loopRegion;
 
+  // Keyboard operability (DEBT-034): the ruler is a real slider, so honour arrow keys instead of
+  // lying with role="slider" on a pointer-only element. Arrows/Home/End move the seek; Shift+arrows
+  // grow/shrink a loop region anchored at the seek; Escape clears it.
+  const clampMs = (ms: number) => Math.max(0, Math.min(RULER_WIDTH_MS, ms));
+  const kbStep = gridMs > 0 ? gridMs : 500; // one grid step, or 0.5s when snapping is off
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (dir !== 0) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        const start = loopRegion ? loopRegion.startMs : seekMs;
+        const curEnd = loopRegion ? loopRegion.endMs : seekMs;
+        const end = clampMs(curEnd + dir * kbStep);
+        onSetLoopRegion(end > start ? { startMs: start, endMs: end } : null); // collapsed → clear
+      } else {
+        onSeek(clampMs(seekMs + dir * kbStep));
+      }
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      onSeek(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      onSeek(RULER_WIDTH_MS);
+    } else if (e.key === "Escape" && loopRegion) {
+      e.preventDefault();
+      onSetLoopRegion(null);
+    }
+  };
+
+  const valueText = looping
+    ? `loop ${(loopRegion!.startMs / 1000).toFixed(1)}s to ${(loopRegion!.endMs / 1000).toFixed(1)}s`
+    : `start ${(seekMs / 1000).toFixed(1)}s`;
+
   return (
     <div
       ref={rulerRef}
       className="timeline-ruler"
       role="slider"
-      aria-label="Playback ruler — click to set the start position, drag to set a loop region"
+      tabIndex={0}
+      aria-label="Playback position. Arrow keys move the start; hold Shift to set a loop region; Home to reset; Escape to clear the loop. Or click to seek, drag to loop."
       aria-valuemin={0}
       aria-valuemax={Math.round(RULER_WIDTH_MS)}
-      aria-valuenow={Math.round(seekMs)}
-      title="Click to set where Play starts · drag to set a loop region"
+      aria-valuenow={Math.round(looping ? loopRegion!.startMs : seekMs)}
+      aria-valuetext={valueText}
+      title="Click to set where Play starts · drag to set a loop region · arrows/Shift+arrows when focused"
       onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
     >
       {ticks}
       {region && (

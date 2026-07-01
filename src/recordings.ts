@@ -1,4 +1,5 @@
 import type { SynthEvent } from "./synth";
+import { reportPersist } from "./persistHealth";
 
 /** A captured event, timestamped in ms from the start of the take. */
 export type RecEvent = SynthEvent & { t: number };
@@ -70,8 +71,10 @@ export function loadRecordings(): Recording[] {
 export function saveRecordings(list: Recording[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    reportPersist(true);
   } catch (e) {
     console.error("failed to persist recordings", e);
+    reportPersist(false); // surface it — a silent quota failure loses the user's takes
   }
 }
 

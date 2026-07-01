@@ -114,6 +114,22 @@ kbd {
   border-radius: 0;
 }
 
+/* Persist-failure banner (DEBT-034) — non-blocking, sits under the topbar in every mode. */
+.storage-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  font-size: 0.85rem;
+  color: #4a2c00;
+  background: #f2a03d;
+  border-bottom: 1px solid #c9812c;
+}
+.storage-banner span[aria-hidden] {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -1442,6 +1458,10 @@ kbd {
   cursor: text; /* hint: click to seek, drag to set a loop region */
   touch-action: none;
 }
+.timeline-ruler:focus-visible {
+  outline: 2px solid var(--accent, #7dd3fc);
+  outline-offset: -2px;
+}
 
 /* Loop region (Slice 7b) — the [start,end) window Play repeats; dimmed while just defined,
    brighter once armed via the transport 🔁. Sits behind the ticks; never eats pointer events. */
@@ -1615,7 +1635,8 @@ kbd {
   opacity: 0;
   transition: opacity 0.1s;
 }
-.section-block:hover .section-del {
+.section-block:hover .section-del,
+.section-block:focus-within .section-del {
   opacity: 1;
 }
 .section-resize {
@@ -1637,8 +1658,16 @@ kbd {
   opacity: 0;
   transition: opacity 0.1s;
 }
-.section-block:hover .section-suggest {
+.section-block:hover .section-suggest,
+.section-block:focus-within .section-suggest {
   opacity: 1;
+}
+/* Keyboard focus must be visible even before the hover reveal fires (DEBT-034 WCAG 2.4.7). */
+.section-del:focus-visible,
+.section-suggest:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent, #7dd3fc);
+  outline-offset: 1px;
 }
 
 /* --- Slice 9: "Suggest what fits" panel --- */
