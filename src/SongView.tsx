@@ -109,6 +109,17 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
   }, []);
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
+  // Rubber-band result (Slice 8b): replace the selection with the covered ids, or union them
+  // in when the drag was additive (Shift/⌘/Ctrl). An empty non-additive marquee clears.
+  const marqueeSelect = useCallback((ids: string[], additive: boolean) => {
+    setSelectedIds((prev) => {
+      if (!additive) return new Set(ids);
+      const n = new Set(prev);
+      ids.forEach((id) => n.add(id));
+      return n;
+    });
+  }, []);
+
   const deleteSelection = useCallback(() => {
     removeClips(liveSelected);
     setSelectedIds(new Set());
@@ -399,7 +410,12 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
             onTrimClip: trimClip,
             onSetClipEffect: setClipEffect,
           }}
-          selection={{ selectedIds, onSelectClip: selectClip, onClearSelection: clearSelection }}
+          selection={{
+            selectedIds,
+            onSelectClip: selectClip,
+            onClearSelection: clearSelection,
+            onMarqueeSelect: marqueeSelect,
+          }}
           seekMs={seekMs}
           loopRegion={loopRegion}
           loopEnabled={loopEnabled}

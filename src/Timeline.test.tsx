@@ -115,7 +115,7 @@ describe("Timeline", () => {
           onApplyTemplate: vi.fn(),
           onSuggestSection: vi.fn(),
         }}
-        selection={{ selectedIds, onSelectClip, onClearSelection }}
+        selection={{ selectedIds, onSelectClip, onClearSelection, onMarqueeSelect: vi.fn() }}
         seekMs={0}
         loopRegion={null}
         loopEnabled={false}
