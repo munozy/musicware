@@ -90,6 +90,10 @@ export function useArrangement() {
   // live Web Audio handles, both torn down on stop so audio never outlives playback.
   const voiceTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const voiceHandlesRef = useRef<VoiceHandle[]>([]);
+  // Run generation (DEBT-034): a voice buffer decode is async, so a decode scheduled by run A
+  // could resolve after a stop→play into run B and attach stale audio. Every run captures this
+  // token; a stop bumps it, so an in-flight decode from a superseded run bails instead of playing.
+  const playGenRef = useRef(0);
 
   // Per-recording preview (shelf ▶). Separate player from arrangement playback.
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -234,6 +238,7 @@ export function useArrangement() {
 
   /** Cancel pending voice-clip starts and stop any voice audio still playing. */
   const stopVoiceClips = useCallback(() => {
+    playGenRef.current++; // invalidate any in-flight voice-buffer decodes from this run
     for (const id of voiceTimersRef.current) clearTimeout(id);
     voiceTimersRef.current = [];
     for (const h of voiceHandlesRef.current) h.stop();
@@ -283,6 +288,7 @@ export function useArrangement() {
 
       const player = playArrangement(stream, emit);
       playerRef.current = player;
+      const gen = ++playGenRef.current; // this run's generation — pins async decodes to it
       setIsPlaying(true);
       setPlayStartedAt(performance.now());
       setPlayOriginMs(origin);
@@ -291,7 +297,7 @@ export function useArrangement() {
       const fireVoice = (vp: { blobKey: string; effect: VoiceEffect }, at: number) => {
         const timer = setTimeout(() => {
           void loadVoiceBuffer(vp.blobKey).then((buf) => {
-            if (!buf || !playerRef.current) return; // stopped before the buffer decoded
+            if (!buf || playGenRef.current !== gen) return; // stopped / superseded before the decode landed
             voiceHandlesRef.current.push(playVoice(buf, vp.effect));
           });
         }, at);
@@ -359,7 +365,12 @@ export function useArrangement() {
   /** Preview a single saved recording (shelf ▶); clicking the playing one stops it. */
   const previewRecording = useCallback(
     (rec: Recording) => {
-      const playingThis = previewingId === rec.id && (previewRef.current || voicePreviewRef.current);
+      // Also treat an in-flight decode of THIS take as "playing" (previewIntentRef === rec.id):
+      // for a voice take voicePreviewRef stays null until the async decode resolves, so without
+      // this a re-click during decode would start a SECOND decode and orphan the first handle.
+      const playingThis =
+        previewingId === rec.id &&
+        (previewRef.current || voicePreviewRef.current || previewIntentRef.current === rec.id);
       if (playingThis) {
         stopPreview();
         return;

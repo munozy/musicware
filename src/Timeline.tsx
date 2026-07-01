@@ -570,6 +570,10 @@ export default function Timeline({
 
   const handleMarqueeDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    // Every fresh gesture starts clean: if a prior drag released OUTSIDE the tracks container the
+    // trailing click never reached onClickCapture, so the flag could be stuck true and would
+    // wrongly swallow this gesture's click. Clearing here (pointerdown precedes any click) fixes it.
+    suppressClearRef.current = false;
     const target = e.target as HTMLElement;
     // Start only from empty space — never from a clip, an interactive control, or a track header.
     if (target.closest("[data-clip-id], button, select, input, .track-header")) return;

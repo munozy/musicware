@@ -6,6 +6,14 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 import { invoke } from "@tauri-apps/api/core";
 
+// Voice (audio) path stubs (DEBT-034 run-generation guard test). loadVoiceBuffer returns a
+// promise we resolve by hand so we can interleave a stop/replay before the decode lands.
+const { loadVoiceBuffer, playVoice } = vi.hoisted(() => ({
+  loadVoiceBuffer: vi.fn(),
+  playVoice: vi.fn(() => ({ stop: vi.fn() })),
+}));
+vi.mock("./voiceAudio", () => ({ loadVoiceBuffer, playVoice }));
+
 import { useArrangement } from "./useArrangement";
 import { newArrangement, saveArrangement } from "./arrangementStore";
 import { loadSongs } from "./songsStore";
@@ -33,10 +41,23 @@ const makeRec = (id: string, startNote = 60): Recording => ({
 const callsFor = (cmd: string) =>
   vi.mocked(invoke).mock.calls.filter(([c]) => c === cmd);
 
+// A voice take (ADR-0009): no events, an audio blob reference.
+const makeVoiceRec = (id: string, blobKey = `blob-${id}`): Recording => ({
+  id,
+  name: id,
+  createdAt: 0,
+  durationMs: 1000,
+  kind: "voice",
+  events: [],
+  audio: { blobKey, mimeType: "audio/webm", effect: "none" },
+});
+
 beforeEach(() => {
   localStorage.clear();
   vi.useFakeTimers();
   vi.mocked(invoke).mockClear();
+  vi.mocked(loadVoiceBuffer).mockReset();
+  vi.mocked(playVoice).mockReset().mockReturnValue({ stop: vi.fn() });
 });
 
 afterEach(() => {
@@ -429,5 +450,49 @@ describe("useArrangement — clip editing (Slice 5)", () => {
     expect(clip.trimStartMs).toBe(200);
     expect(clip.startMs).toBe(1200);
     expect(readActiveSong().tracks[0].clips[0].trimStartMs).toBe(200);
+  });
+});
+
+describe("useArrangement — voice decode run-generation guard (DEBT-034)", () => {
+  it("a voice buffer decoded AFTER a stop→replay does NOT play (no stale audio across runs)", async () => {
+    // loadVoiceBuffer resolves only when we say so, so we can stop + replay mid-decode.
+    let resolveA: (b: unknown) => void = () => {};
+    vi.mocked(loadVoiceBuffer).mockImplementationOnce(() => new Promise((res) => (resolveA = res)));
+
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const voice = makeVoiceRec("v1");
+    act(() => result.current.placeClip(trackId, "v1", 0));
+
+    act(() => result.current.play([voice]));
+    act(() => vi.advanceTimersByTime(1)); // fire the t=0 voice-start timer → loadVoiceBuffer (run A)
+    expect(loadVoiceBuffer).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.stop()); // run A invalidated (playGenRef bumped)
+
+    // Run A's decode finally lands — the guard must drop it.
+    await act(async () => {
+      resolveA({});
+      await Promise.resolve();
+    });
+    expect(playVoice).not.toHaveBeenCalled();
+  });
+
+  it("a voice buffer decoded within the SAME run DOES play (happy path intact)", async () => {
+    let resolve: (b: unknown) => void = () => {};
+    vi.mocked(loadVoiceBuffer).mockImplementationOnce(() => new Promise((res) => (resolve = res)));
+
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const voice = makeVoiceRec("v1");
+    act(() => result.current.placeClip(trackId, "v1", 0));
+
+    act(() => result.current.play([voice]));
+    act(() => vi.advanceTimersByTime(1));
+    await act(async () => {
+      resolve({}); // still the same run → the guard passes
+      await Promise.resolve();
+    });
+    expect(playVoice).toHaveBeenCalledTimes(1);
   });
 });

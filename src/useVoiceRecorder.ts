@@ -28,6 +28,9 @@ export function useVoiceRecorder({
   const t0Ref = useRef(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewRef = useRef<VoiceHandle | null>(null);
+  // The take a preview is INTENDED for — guards the async decode against a newer preview (or a
+  // stop) that superseded it before its buffer finished decoding (DEBT-034; mirrors useArrangement).
+  const previewIntentRef = useRef<string | null>(null);
 
   // Always-current refs so the MediaRecorder.onstop closure (bound once per take) names and
   // saves against the latest library without re-binding.
@@ -122,6 +125,7 @@ export function useVoiceRecorder({
   }, [isRecording]);
 
   const stopPreview = useCallback(() => {
+    previewIntentRef.current = null; // cancels any in-flight decode
     previewRef.current?.stop();
     previewRef.current = null;
     setPreviewingId(null);
@@ -131,22 +135,27 @@ export function useVoiceRecorder({
   const preview = useCallback(
     async (rec: Recording, effect?: VoiceEffect) => {
       if (!rec.audio) return;
-      if (previewRef.current && previewingId === rec.id && effect === undefined) {
+      // Toggle off if this take is already playing OR still decoding (previewRef is null mid-decode,
+      // so also match the pending intent — otherwise a re-click starts a second decode + orphans a handle).
+      if (previewingId === rec.id && effect === undefined && (previewRef.current || previewIntentRef.current === rec.id)) {
         stopPreview();
         return;
       }
       stopPreview();
+      previewIntentRef.current = rec.id;
+      setPreviewingId(rec.id); // optimistic — the decode is async
       const buf = await loadVoiceBuffer(rec.audio.blobKey);
+      if (previewIntentRef.current !== rec.id) return; // superseded (newer preview / stop) mid-decode
       if (!buf) {
+        previewIntentRef.current = null;
+        setPreviewingId(null);
         setError("Couldn't load that take's audio.");
         return;
       }
-      const handle = playVoice(buf, effect ?? rec.audio.effect, () => {
+      previewRef.current = playVoice(buf, effect ?? rec.audio.effect, () => {
         previewRef.current = null;
-        setPreviewingId(null);
+        setPreviewingId((cur) => (cur === rec.id ? null : cur));
       });
-      previewRef.current = handle;
-      setPreviewingId(rec.id);
     },
     [previewingId, stopPreview],
   );
@@ -158,6 +167,7 @@ export function useVoiceRecorder({
       const mr = recorderRef.current;
       if (mr && mr.state !== "inactive") mr.stop();
       stopTracks();
+      previewIntentRef.current = null; // any in-flight decode bails instead of playing post-unmount
       previewRef.current?.stop();
     };
   }, [stopTracks]);
