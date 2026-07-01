@@ -1503,6 +1503,17 @@ kbd {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  position: relative; /* anchor for the rubber-band marquee overlay (Slice 8b) */
+}
+
+/* Rubber-band box-select (Slice 8b) — the drag rectangle over empty lane space. */
+.timeline-marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--accent, #7dd3fc);
+  background: rgba(125, 211, 252, 0.14);
+  pointer-events: none;
+  border-radius: 2px;
 }
 
 /* --- Slice 6: song-structure section band --- */

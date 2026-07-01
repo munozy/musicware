@@ -17,6 +17,7 @@ import { useRef, useState } from "react";
 import { arrangementContentMs, clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
 import { isVoice, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
 import { pxToMs, msToPx, snapMs, beatMs, PX_PER_MS } from "./timeScale";
+import { normalizeRect, marqueeSelection, type Rect } from "./marquee";
 import TrackHeader from "./TrackHeader";
 import SectionBand, { type SectionOps } from "./SectionBand";
 import Playhead from "./Playhead";
@@ -76,6 +77,8 @@ export type Selection = {
   selectedIds: Set<string>;
   onSelectClip: (id: string, additive: boolean) => void;
   onClearSelection: () => void;
+  /** Rubber-band result (Slice 8b): the clip ids the marquee covered; additive keeps the prior set. */
+  onMarqueeSelect: (ids: string[], additive: boolean) => void;
 };
 
 function ClipBlock({
@@ -555,6 +558,51 @@ export default function Timeline({
   // at where Play would begin (loop start when armed, else the seek position).
   const playheadOrigin = isPlaying ? playOriginMs : looping ? loopRegion!.startMs : seekMs;
   const playheadLoopLen = isPlaying ? playLoopLenMs : 0;
+
+  // --- Rubber-band box-select (Slice 8b) -----------------------------------------------------
+  // Drag over empty lane space to draw a marquee; every clip box it touches gets selected.
+  // We measure real laid-out clip rects on pointer-up (immune to row-height assumptions), test
+  // them against the marquee with the pure `marqueeSelection`, and suppress the click-clear that
+  // would otherwise fire on the same gesture.
+  const tracksRef = useRef<HTMLDivElement>(null);
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  const suppressClearRef = useRef(false);
+
+  const handleMarqueeDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    // Start only from empty space — never from a clip, an interactive control, or a track header.
+    if (target.closest("[data-clip-id], button, select, input, .track-header")) return;
+    const container = tracksRef.current;
+    if (!container) return;
+    const box = container.getBoundingClientRect();
+    const x0 = e.clientX - box.left;
+    const y0 = e.clientY - box.top;
+    let moved = false;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+
+    const onMove = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) >= 4) moved = true;
+      if (moved) setMarquee(normalizeRect(x0, y0, ev.clientX - box.left, ev.clientY - box.top));
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (moved) {
+        const m = normalizeRect(x0, y0, ev.clientX - box.left, ev.clientY - box.top);
+        const boxes = Array.from(container.querySelectorAll<HTMLElement>("[data-clip-id]")).map((el) => {
+          const r = el.getBoundingClientRect();
+          return { id: el.dataset.clipId!, rect: { x: r.left - box.left, y: r.top - box.top, w: r.width, h: r.height } };
+        });
+        selection.onMarqueeSelect(marqueeSelection(m, boxes), additive);
+        suppressClearRef.current = true; // eat the trailing click so the lane doesn't clear it
+      }
+      setMarquee(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <div className="timeline" role="region" aria-label="Timeline">
       <Ruler
@@ -572,7 +620,24 @@ export default function Timeline({
         contentMs={arrangementContentMs(arrangement, recordings)}
         ops={sectionOps}
       />
-      <div className="timeline-tracks">
+      <div
+        ref={tracksRef}
+        className="timeline-tracks"
+        onPointerDown={handleMarqueeDown}
+        onClickCapture={(e) => {
+          if (suppressClearRef.current) {
+            suppressClearRef.current = false;
+            e.stopPropagation(); // this click ended a marquee drag — don't let a lane clear the selection
+          }
+        }}
+      >
+        {marquee && (
+          <div
+            className="timeline-marquee"
+            style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
+            aria-hidden="true"
+          />
+        )}
         {arrangement.tracks.map((track, i) => (
           <div key={track.id} className="timeline-track-row">
             <TrackHeader
