@@ -14,7 +14,7 @@
  */
 
 import { useRef, useState } from "react";
-import { arrangementContentMs, clipPlayedMs, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
+import { arrangementContentMs, playedMsFor, clipWindow, type Arrangement, type ClipInstance } from "./arrangement";
 import { isVoice, VOICE_EFFECTS, type Recording, type VoiceEffect } from "./recordings";
 import { pxToMs, msToPx, snapMs, beatMs, PX_PER_MS } from "./timeScale";
 import { normalizeRect, marqueeSelection, type Rect } from "./marquee";
@@ -112,10 +112,11 @@ function ClipBlock({
   const effect: VoiceEffect = clip.effect ?? rec?.audio?.effect ?? "none";
   const effectLabel = VOICE_EFFECTS.find((e) => e.value === effect)?.label ?? "";
   const effectEmoji = effectLabel.split(" ")[0];
-  // Width reflects the TRIMMED window × loops, so the block on screen is exactly as long as
-  // it sounds (clipPlayedMs is the same maths the scheduler loops over). Falls back to a stub
-  // width for a dangling clip whose recording is gone.
-  const playedMs = rec ? clipPlayedMs(clip, rec.durationMs) : 0;
+  // Width reflects what actually SOUNDS: trimmed window × loops for keyboard clips, and the
+  // rate-shifted (effect-aware) length for voice clips — playedMsFor is the same maths the
+  // scheduler uses, so a loop region drawn over the block matches the audio (DEBT-034 r3).
+  // Falls back to a stub width for a dangling clip whose recording is gone.
+  const playedMs = rec ? playedMsFor(clip, rec) : 0;
   const widthPx = rec ? Math.max(MIN_CLIP_PX, msToPx(playedMs, PX_PER_MS)) : MIN_CLIP_PX;
   const leftPx = msToPx(clip.startMs, PX_PER_MS);
   // Duplicate lands right after this clip so the copy abuts (the caller owns the geometry —

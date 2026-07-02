@@ -53,6 +53,24 @@ export function isVoice(rec: Recording): boolean {
   return rec.kind === "voice";
 }
 
+/** The playback-rate an effect imposes (1 = unchanged). Chipmunk/Monster shift pitch+speed. */
+export function effectPlaybackRate(effect: VoiceEffect): number {
+  if (effect === "chipmunk") return 1.6;
+  if (effect === "monster") return 0.65;
+  return 1;
+}
+
+/**
+ * How long a take actually SOUNDS under an effect (DEBT-034): a rate-shifting effect plays the
+ * same samples faster/slower, so the audible length is recorded ÷ rate. EVERYTHING that measures
+ * a voice clip — scheduler, export, block width, duplicate offset, suggestions — must use this,
+ * or the screen and the audio disagree. Pure; lives here (not voiceAudio) so the pure modules
+ * can share it without touching Web Audio.
+ */
+export function effectiveVoiceDurationMs(durationMs: number, effect: VoiceEffect): number {
+  return Math.max(0, durationMs) / effectPlaybackRate(effect);
+}
+
 const STORAGE_KEY = "musicware.recordings.v1";
 
 /** Load the saved library. Tolerates missing/corrupt storage by returning []. */

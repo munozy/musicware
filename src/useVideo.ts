@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { newId } from "./recordings";
-import { getBlob, putBlob } from "./voiceStore";
+import { getBlob, putBlob, deleteBlob } from "./voiceStore";
 import {
   loadVideoProjects,
   saveVideoProjects,
@@ -113,7 +113,21 @@ export function useVideo() {
   }, [setActiveProject]);
 
   // ---- image edits ----
-  const removeImage = useCallback((id: string) => setActiveProject((p) => removeImageOp(p, id)), [setActiveProject]);
+  // Removing an image also frees its IndexedDB blob (DEBT-034 — image keys are project-owned,
+  // never shared: import and project-import both mint fresh keys). Best-effort: a failed blob
+  // delete only leaks storage, never corrupts the project.
+  const removeImage = useCallback(
+    (id: string) => {
+      const img = project.images.find((i) => i.id === id);
+      if (img) {
+        void deleteBlob(img.imageKey).catch(() => {
+          /* best-effort */
+        });
+      }
+      setActiveProject((p) => removeImageOp(p, id));
+    },
+    [project, setActiveProject],
+  );
   const reorderImage = useCallback(
     (id: string, dir: "left" | "right") => setActiveProject((p) => reorderImageOp(p, id, dir)),
     [setActiveProject],
@@ -140,14 +154,27 @@ export function useVideo() {
     setActiveId(p.id);
   }, []);
   const renameActive = useCallback((name: string) => setActiveProject((p) => renameProject(p, name)), [setActiveProject]);
-  const deleteProject = useCallback((id: string) => {
-    setProjects((prev) => {
-      if (prev.length <= 1) return prev;
-      const next = prev.filter((p) => p.id !== id);
-      if (id === activeIdRef.current) setActiveId(next[0].id);
-      return next;
-    });
-  }, []);
+  const deleteProject = useCallback(
+    (id: string) => {
+      // Free the doomed project's image blobs (DEBT-034) — but only if the delete will actually
+      // happen (the last project is refused, mirroring the setter's guard below).
+      if (projects.length > 1) {
+        const doomed = projects.find((p) => p.id === id);
+        for (const img of doomed?.images ?? []) {
+          void deleteBlob(img.imageKey).catch(() => {
+            /* best-effort */
+          });
+        }
+      }
+      setProjects((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = prev.filter((p) => p.id !== id);
+        if (id === activeIdRef.current) setActiveId(next[0].id);
+        return next;
+      });
+    },
+    [projects],
+  );
 
   const projectRefs = useMemo(() => projects.map((p) => ({ id: p.id, name: p.name })), [projects]);
 

@@ -5,7 +5,12 @@
  * and transparent (it's a hook for a smarter future suggester, not the suggester itself).
  */
 
-import type { Recording } from "./recordings";
+import { isVoice, effectiveVoiceDurationMs, type Recording } from "./recordings";
+
+/** The length a take actually SOUNDS when placed: rate-shifted for voice takes (DEBT-034 r3). */
+function soundMsOf(r: Recording): number {
+  return isVoice(r) && r.audio ? effectiveVoiceDurationMs(r.durationMs, r.audio.effect) : r.durationMs;
+}
 
 export type Suggestion = {
   recording: Recording;
@@ -23,10 +28,11 @@ export type Suggestion = {
 export function suggestForSection(sectionMs: number, recordings: Recording[], max = 4): Suggestion[] {
   const span = Math.max(1, sectionMs);
   return recordings
-    .filter((r) => r.durationMs > 0)
+    .filter((r) => soundMsOf(r) > 0)
     .map((r) => {
-      const loopCount = Math.max(1, Math.round(span / r.durationMs));
-      const fillMs = loopCount * r.durationMs;
+      const dur = soundMsOf(r); // audible length — a chipmunk take fills less than it recorded
+      const loopCount = Math.max(1, Math.round(span / dur));
+      const fillMs = loopCount * dur;
       const leftover = Math.abs(span - fillMs);
       const score = Math.max(0, 1 - leftover / span);
       const reason =
@@ -37,6 +43,6 @@ export function suggestForSection(sectionMs: number, recordings: Recording[], ma
           : `loops ${loopCount}× to fill`;
       return { recording: r, loopCount, fillMs, score, reason };
     })
-    .sort((a, b) => b.score - a.score || a.loopCount - b.loopCount || a.recording.durationMs - b.recording.durationMs)
+    .sort((a, b) => b.score - a.score || a.loopCount - b.loopCount || soundMsOf(a.recording) - soundMsOf(b.recording))
     .slice(0, Math.max(0, max));
 }

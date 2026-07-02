@@ -34,6 +34,45 @@ describe("parseVideoBundle", () => {
     expect(() => parseVideoBundle(JSON.stringify({ format: VIDEO_FORMAT, version: 99 }))).toThrow(/version/i);
     expect(() => parseVideoBundle(JSON.stringify({ format: VIDEO_FORMAT, version: 1, video: {} }))).toThrow(/missing/i);
   });
+
+  it("validates the EMBEDDED song bundle too (it must not bypass the .mwsong checks)", () => {
+    const withSong = bundle();
+    withSong.song = {
+      format: "musicware.songproject",
+      version: 1,
+      exportedAt: 0,
+      song: { id: "s", name: "S", createdAt: 0, tempoBpm: 120, timeSig: [4, 4], sections: [], tracks: [] },
+      recordings: [{ id: "r1", name: "r1", createdAt: 0, durationMs: 100, events: "corrupt" }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    expect(() => parseVideoBundle(serializeVideoBundle(withSong))).toThrow(/embedded song is invalid/i);
+
+    // a WELL-FORMED embedded song passes
+    const ok = bundle();
+    ok.song = {
+      format: "musicware.songproject",
+      version: 1,
+      exportedAt: 0,
+      song: { id: "s", name: "S", createdAt: 0, tempoBpm: 120, timeSig: [4, 4], sections: [], tracks: [] },
+      recordings: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    expect(() => parseVideoBundle(serializeVideoBundle(ok))).not.toThrow();
+  });
+
+  it("rejects malformed image entries (DEBT-034: they must not reach the base64 decode)", () => {
+    const noData = bundle();
+    (noData.video.images[0] as { dataBase64: unknown }).dataBase64 = 42;
+    expect(() => parseVideoBundle(serializeVideoBundle(noData))).toThrow(/malformed image/i);
+
+    const noMime = bundle();
+    (noMime.video.images[1] as { mimeType: unknown }).mimeType = null;
+    expect(() => parseVideoBundle(serializeVideoBundle(noMime))).toThrow(/malformed image/i);
+
+    const notObject = bundle();
+    (notObject.video.images as unknown[])[0] = "nope";
+    expect(() => parseVideoBundle(serializeVideoBundle(notObject))).toThrow(/malformed image/i);
+  });
 });
 
 describe("remapVideoImages", () => {

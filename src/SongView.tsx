@@ -13,8 +13,8 @@ import ClipShelf from "./ClipShelf";
 import Timeline from "./Timeline";
 import SongTransport from "./SongTransport";
 import SongBar from "./SongBar";
-import { renderSongFile, songHasContent, type ExportFormat } from "./exportSong";
-import { clipPlayedMs, type Section } from "./arrangement";
+import { renderSongFile, songHasContent, ExportTooLongError, type ExportFormat } from "./exportSong";
+import { playedMsFor, type Section } from "./arrangement";
 import { gridMsFor, type SnapDivision } from "./timeScale";
 import { suggestForSection, type Suggestion } from "./suggest";
 import { formatDuration } from "./recordings";
@@ -128,9 +128,13 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
   const duplicateSelection = useCallback(() => {
     const clips = allClips.filter((c) => selectedIds.has(c.id));
     if (clips.length === 0) return;
-    const durOf = (recId: string) => recordings.find((r) => r.id === recId)?.durationMs ?? 0;
+    // playedMsFor = the effect-aware audible length (same maths as the block width/scheduler).
+    const playedOf = (c: (typeof clips)[number]) => {
+      const rec = recordings.find((r) => r.id === c.recordingId);
+      return rec ? playedMsFor(c, rec) : 0;
+    };
     const minStart = Math.min(...clips.map((c) => c.startMs));
-    const maxEnd = Math.max(...clips.map((c) => c.startMs + clipPlayedMs(c, durOf(c.recordingId))));
+    const maxEnd = Math.max(...clips.map((c) => c.startMs + playedOf(c)));
     const offset = Math.max(0, maxEnd - minStart); // drop the copies right after the group
     duplicateClips(clips.map((c) => ({ clipId: c.id, atMs: c.startMs + offset })));
   }, [allClips, selectedIds, recordings, duplicateClips]);
@@ -215,7 +219,8 @@ export default function SongView({ recordings, onAddRecordings, onGoToPlay }: Pr
         setExportMsg(`Exported ${format.toUpperCase()} ✓`);
       } catch (e) {
         console.error("export failed", e);
-        setExportMsg("Export failed.");
+        // The length guard writes a user-facing message; everything else stays generic.
+        setExportMsg(e instanceof ExportTooLongError ? e.message : "Export failed.");
       } finally {
         setExporting(false);
       }

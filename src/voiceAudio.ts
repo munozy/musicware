@@ -9,7 +9,7 @@
  *   Echo → feedback Delay · Telephone → band-pass Biquad · Reverb → Convolver (generated IR)
  */
 
-import type { VoiceEffect } from "./recordings";
+import { effectPlaybackRate, type VoiceEffect } from "./recordings";
 import { getBlob } from "./voiceStore";
 
 type WindowWithWebkit = typeof window & { webkitAudioContext?: typeof AudioContext };
@@ -43,12 +43,9 @@ export function clearVoiceBuffer(blobKey: string): void {
   bufferCache.delete(blobKey);
 }
 
-/** The playback-rate an effect imposes (1 = unchanged). Chipmunk/Monster shift pitch+speed. */
-export function effectPlaybackRate(effect: VoiceEffect): number {
-  if (effect === "chipmunk") return 1.6;
-  if (effect === "monster") return 0.65;
-  return 1;
-}
+// The pure rate/duration helpers live in recordings.ts (shared with the pure scheduler /
+// geometry modules); re-exported here for the audio-side callers and existing imports.
+export { effectPlaybackRate, effectiveVoiceDurationMs } from "./recordings";
 
 function distortionCurve(amount = 600): Float32Array {
   const n = 44100;

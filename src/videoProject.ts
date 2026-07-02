@@ -8,11 +8,12 @@
 import {
   buildProjectBundle,
   importProjectBundle,
+  validateProjectBundle,
   bytesToBase64,
   base64ToBytes,
   type ProjectBundle,
 } from "./songProject";
-import { getBlob, putBlob } from "./voiceStore";
+import { getBlob, putBlob, deleteBlob } from "./voiceStore";
 import { newImageKey, type VideoImage, type VideoProject } from "./videoStore";
 import { newId, type Recording } from "./recordings";
 import type { Arrangement } from "./arrangement";
@@ -74,6 +75,23 @@ export function parseVideoBundle(text: string): VideoBundle {
   if (!b.video || !Array.isArray(b.video.images)) {
     throw new Error("The video-project file is missing its images.");
   }
+  // Per-image structure (DEBT-034): the import base64-decodes and Blob-wraps each one without
+  // further guards, so reject malformed entries here with a friendly message.
+  for (const img of b.video.images as unknown[]) {
+    const i = (img ?? {}) as Partial<ExportedImage>;
+    if (!img || typeof img !== "object" || typeof i.dataBase64 !== "string" || typeof i.mimeType !== "string") {
+      throw new Error("The video-project file has a malformed image.");
+    }
+  }
+  // The embedded soundtrack is a FULL song ProjectBundle — run it through the same validation
+  // the .mwsong path gets, or junk recordings slip straight into the library (DEBT-034 r3).
+  if (b.song != null) {
+    try {
+      validateProjectBundle(b.song);
+    } catch (e) {
+      throw new Error(`The video-project's embedded song is invalid: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   return b as VideoBundle;
 }
 
@@ -107,17 +125,38 @@ export async function importVideoBundle(bundle: VideoBundle): Promise<{
 }> {
   let song: Arrangement | null = null;
   let recordings: Recording[] = [];
+  let songBlobKeys: string[] = [];
   let songId = "";
   if (bundle.song) {
     const r = await importProjectBundle(bundle.song);
     song = r.song;
     recordings = r.recordings;
+    songBlobKeys = r.writtenBlobKeys;
     songId = song.id;
   }
 
   const { images, blobs } = remapVideoImages(bundle);
-  for (const b of blobs) {
-    if (b.base64) await putBlob(b.key, new Blob([base64ToBytes(b.base64)], { type: b.mime }));
+  // Write-all-or-clean-up (DEBT-034): if an image blob write fails, the project is never added,
+  // so delete the partial image writes AND the voice blobs the song import just wrote (ONLY
+  // those — a recording without embedded audio kept its original key, which may alias a blob
+  // already in this library), then rethrow for the friendly message.
+  const written: string[] = [];
+  try {
+    for (const b of blobs) {
+      if (b.base64) {
+        await putBlob(b.key, new Blob([base64ToBytes(b.base64)], { type: b.mime }));
+        written.push(b.key);
+      }
+    }
+  } catch (e) {
+    for (const key of [...written, ...songBlobKeys]) {
+      try {
+        await deleteBlob(key);
+      } catch {
+        /* best-effort */
+      }
+    }
+    throw e;
   }
 
   const project: VideoProject = {

@@ -8,11 +8,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 // Voice (audio) path stubs (DEBT-034 run-generation guard test). loadVoiceBuffer returns a
 // promise we resolve by hand so we can interleave a stop/replay before the decode lands.
+// The pure helpers (effectiveVoiceDurationMs etc.) pass through from the real module.
 const { loadVoiceBuffer, playVoice } = vi.hoisted(() => ({
   loadVoiceBuffer: vi.fn(),
   playVoice: vi.fn(() => ({ stop: vi.fn() })),
 }));
-vi.mock("./voiceAudio", () => ({ loadVoiceBuffer, playVoice }));
+vi.mock("./voiceAudio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./voiceAudio")>()),
+  loadVoiceBuffer,
+  playVoice,
+}));
 
 import { useArrangement } from "./useArrangement";
 import { newArrangement, saveArrangement } from "./arrangementStore";
@@ -494,5 +499,60 @@ describe("useArrangement — voice decode run-generation guard (DEBT-034)", () =
       await Promise.resolve();
     });
     expect(playVoice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useArrangement — voice clips in a loop / under rate effects (DEBT-034 round 3)", () => {
+  it("truncates a voice clip at the loop-cycle boundary (stop fired at the region end)", async () => {
+    vi.mocked(loadVoiceBuffer).mockResolvedValue({});
+    const stops: ReturnType<typeof vi.fn>[] = [];
+    vi.mocked(playVoice).mockImplementation(() => {
+      const stop = vi.fn();
+      stops.push(stop);
+      return { stop };
+    });
+
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const voice = makeVoiceRec("v1"); // recorded 1000ms, effect none → sounds 1000ms
+    act(() => result.current.placeClip(trackId, "v1", 0));
+    act(() => result.current.setLoopRegion({ startMs: 0, endMs: 800 })); // clip outlives the cycle
+
+    act(() => result.current.play([voice]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1); // fire the t=0 start → decode resolves → handle
+    });
+    expect(stops.length).toBeGreaterThan(0);
+    expect(stops[0]).not.toHaveBeenCalled(); // still sounding mid-cycle
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800); // reach the cycle boundary
+    });
+    expect(stops[0]).toHaveBeenCalled(); // force-closed at the boundary, like symbolic notes
+  });
+
+  it("loops a chipmunk clip at its AUDIBLE length (1000ms recorded → repeats every 625ms)", async () => {
+    vi.mocked(loadVoiceBuffer).mockResolvedValue({});
+
+    const { result } = renderHook(() => useArrangement());
+    const trackId = result.current.arrangement.tracks[0].id;
+    const voice: Recording = {
+      ...makeVoiceRec("v1"),
+      audio: { blobKey: "blob-v1", mimeType: "audio/webm", effect: "chipmunk" }, // rate 1.6
+    };
+    act(() => result.current.placeClip(trackId, "v1", 0));
+    const clipId = result.current.arrangement.tracks[0].clips[0].id;
+    act(() => result.current.setClipLoop(clipId, 2));
+
+    act(() => result.current.play([voice]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1); // first play at t=0
+    });
+    expect(playVoice).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(630); // past 625 (=1000/1.6), before 1000
+    });
+    expect(playVoice).toHaveBeenCalledTimes(2); // second repeat abuts the audible end
   });
 });
