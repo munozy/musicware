@@ -1,4 +1,4 @@
-import { isVoice, type Recording, type RecEvent, type VoiceEffect } from "./recordings";
+import { isVoice, effectiveVoiceDurationMs, type Recording, type RecEvent, type VoiceEffect } from "./recordings";
 import type { SynthEvent } from "./synth";
 
 /**
@@ -102,6 +102,23 @@ export function clipPlayedMs(
   return clipWindow(clip, durationMs).windowLen * loops;
 }
 
+/**
+ * Played length of a clip in ms, ONE source of truth for screen AND scheduler (DEBT-034 r3).
+ * Voice clips sound for loops × the rate-shifted take length (chipmunk shorter, monster
+ * longer; trim doesn't apply to voice playback — ADR-0009 V1); keyboard clips use the
+ * trimmed-window maths. Every geometry consumer (block width, duplicate offset, content
+ * length, suggestions) and the voice scheduler must agree on THIS number, or the loop
+ * region you draw on screen doesn't match what plays.
+ */
+export function playedMsFor(clip: ClipInstance, rec: Recording): number {
+  if (isVoice(rec)) {
+    const effect = clip.effect ?? rec.audio?.effect ?? "none";
+    const loops = Math.max(1, Math.floor(clip.loopCount || 1));
+    return loops * effectiveVoiceDurationMs(rec.durationMs, effect);
+  }
+  return clipPlayedMs(clip, rec.durationMs);
+}
+
 /** The end time of the latest-finishing clip (ms) — the arrangement's content length; 0 if empty.
  * Used to size song-structure templates (Slice 6) to the actual material. */
 export function arrangementContentMs(
@@ -114,7 +131,7 @@ export function arrangementContentMs(
     for (const clip of track.clips) {
       const rec = byId.get(clip.recordingId);
       if (!rec) continue;
-      end = Math.max(end, Math.max(0, clip.startMs) + clipPlayedMs(clip, rec.durationMs));
+      end = Math.max(end, Math.max(0, clip.startMs) + playedMsFor(clip, rec));
     }
   }
   return end;
@@ -248,7 +265,10 @@ export type VoiceClipPlay = {
   effect: VoiceEffect;
   startMs: number;
   loopCount: number;
+  /** Recorded take length (ms) — the raw buffer length. */
   durationMs: number;
+  /** AUDIBLE length per play (ms) under `effect` (rate-shifted) — what scheduling/geometry use. */
+  soundMs: number;
 };
 
 /**
@@ -271,13 +291,15 @@ export function voiceClipPlays(
       if (clip.muted) continue;
       const rec = byId.get(clip.recordingId);
       if (!rec || !isVoice(rec) || !rec.audio) continue;
+      const effect = clip.effect ?? rec.audio.effect; // per-clip override wins; else the take's effect
       plays.push({
         recordingId: rec.id,
         blobKey: rec.audio.blobKey,
-        effect: clip.effect ?? rec.audio.effect, // per-clip override wins; else the take's effect
+        effect,
         startMs: Math.max(0, clip.startMs),
         loopCount: Math.max(1, Math.floor(clip.loopCount || 1)),
         durationMs: Math.max(0, rec.durationMs),
+        soundMs: effectiveVoiceDurationMs(rec.durationMs, effect),
       });
     }
   }

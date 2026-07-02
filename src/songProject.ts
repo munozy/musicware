@@ -12,7 +12,7 @@
  */
 
 import { newId, isVoice, type Recording } from "./recordings";
-import { newBlobKey, getBlob, putBlob } from "./voiceStore";
+import { newBlobKey, getBlob, putBlob, deleteBlob } from "./voiceStore";
 import type { Arrangement } from "./arrangement";
 
 export const PROJECT_FORMAT = "musicware.songproject";
@@ -80,14 +80,12 @@ export function serializeProject(bundle: ProjectBundle): string {
 
 // ---- import ----
 
-/** Parse + validate a project file's text. Throws a friendly Error on anything malformed. */
-export function parseProjectBundle(text: string): ProjectBundle {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error("That file isn't valid JSON.");
-  }
+/**
+ * Validate a parsed value as a ProjectBundle. Shared by parseProjectBundle AND the .mwvid
+ * import (whose embedded soundtrack is a full ProjectBundle that would otherwise bypass every
+ * check — DEBT-034 r3). Throws a friendly Error; returns the typed bundle.
+ */
+export function validateProjectBundle(parsed: unknown): ProjectBundle {
   const b = parsed as Partial<ProjectBundle> | null;
   if (!b || typeof b !== "object" || b.format !== PROJECT_FORMAT) {
     throw new Error("That isn't a musicware song-project file.");
@@ -98,7 +96,39 @@ export function parseProjectBundle(text: string): ProjectBundle {
   if (!b.song || !Array.isArray(b.song.tracks) || !Array.isArray(b.recordings)) {
     throw new Error("The project file is missing its song or recordings.");
   }
+  // Per-item structure (DEBT-034): remapProject and the players index into these WITHOUT
+  // further guards (t.clips.map, [...rec.events]), so an internally-malformed bundle must be
+  // rejected here with a friendly message — not explode later or, worse, persist junk into
+  // the library that crashes playback on every launch.
+  for (const t of b.song.tracks as unknown[]) {
+    if (!t || typeof t !== "object" || !Array.isArray((t as { clips?: unknown }).clips)) {
+      throw new Error("The project file has a malformed track.");
+    }
+  }
+  for (const r of b.recordings as unknown[]) {
+    const rec = (r ?? {}) as Partial<ExportedRecording>;
+    if (!r || typeof r !== "object" || typeof rec.id !== "string" || !Array.isArray(rec.events)) {
+      throw new Error("The project file has a malformed recording.");
+    }
+    if (rec.kind === "voice" && rec.audio && typeof rec.audio.mimeType !== "string") {
+      throw new Error("The project file has a malformed voice recording.");
+    }
+    if (rec.audioBase64 !== undefined && typeof rec.audioBase64 !== "string") {
+      throw new Error("The project file has a malformed voice recording.");
+    }
+  }
   return b as ProjectBundle;
+}
+
+/** Parse + validate a project file's text. Throws a friendly Error on anything malformed. */
+export function parseProjectBundle(text: string): ProjectBundle {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("That file isn't valid JSON.");
+  }
+  return validateProjectBundle(parsed);
 }
 
 /**
@@ -147,13 +177,34 @@ export function remapProject(bundle: ProjectBundle): {
   return { song, recordings, blobs };
 }
 
-/** Remap a bundle and persist its voice blobs to IndexedDB. Returns the song + recordings to add. */
+/**
+ * Remap a bundle and persist its voice blobs to IndexedDB. Returns the song + recordings to
+ * add, plus the blob keys THIS import wrote — a caller cleaning up after a downstream failure
+ * must delete exactly those (a recording without embedded audio keeps its ORIGINAL key, which
+ * may alias a blob already in this machine's library — deleting it would corrupt a real take).
+ */
 export async function importProjectBundle(
   bundle: ProjectBundle,
-): Promise<{ song: Arrangement; recordings: Recording[] }> {
+): Promise<{ song: Arrangement; recordings: Recording[]; writtenBlobKeys: string[] }> {
   const { song, recordings, blobs } = remapProject(bundle);
-  for (const b of blobs) {
-    await putBlob(b.key, new Blob([base64ToBytes(b.base64)], { type: b.mime }));
+  // Write-all-or-clean-up: a failure mid-way (bad base64, IndexedDB error) means the song is
+  // never added, so any blobs already written would orphan forever (DEBT-034). Best-effort
+  // delete of the partial writes, then rethrow for the caller's friendly message.
+  const written: string[] = [];
+  try {
+    for (const b of blobs) {
+      await putBlob(b.key, new Blob([base64ToBytes(b.base64)], { type: b.mime }));
+      written.push(b.key);
+    }
+  } catch (e) {
+    for (const key of written) {
+      try {
+        await deleteBlob(key);
+      } catch {
+        /* best-effort */
+      }
+    }
+    throw e;
   }
-  return { song, recordings };
+  return { song, recordings, writtenBlobKeys: written };
 }

@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { encodeWav, encodeMp3, songDurationMs, songHasContent } from "./exportSong";
+import {
+  encodeWav,
+  encodeMp3,
+  songDurationMs,
+  songHasContent,
+  renderMixedSong,
+  ExportTooLongError,
+  MAX_EXPORT_MS,
+} from "./exportSong";
 import { newArrangement, addClip } from "./arrangementStore";
 import type { Arrangement } from "./arrangement";
 import type { Recording } from "./recordings";
@@ -77,5 +85,35 @@ describe("songDurationMs / songHasContent", () => {
   it("songDurationMs reflects the last event time (clip start + its events)", () => {
     // clip at 2000ms, last off at 800ms into the take → 2800ms
     expect(songDurationMs(withClip(2000), [rec("r1")])).toBe(2800);
+  });
+
+  it("songDurationMs uses the AUDIBLE (rate-shifted) voice length — matches live playback", () => {
+    const voice: Recording = {
+      id: "v1",
+      name: "v1",
+      createdAt: 0,
+      durationMs: 1000,
+      kind: "voice",
+      events: [],
+      audio: { blobKey: "k", mimeType: "audio/webm", effect: "chipmunk" }, // rate 1.6
+    };
+    const a = newArrangement();
+    let withVoice = addClip(a, a.tracks[0].id, "v1", 0);
+    withVoice = {
+      ...withVoice,
+      tracks: withVoice.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => ({ ...c, loopCount: 2 })),
+      })),
+    };
+    expect(songDurationMs(withVoice, [voice])).toBeCloseTo(1250); // 2 × 625, not 2 × 1000
+  });
+
+  it("renderMixedSong rejects a song past MAX_EXPORT_MS BEFORE allocating (DEBT-034)", async () => {
+    // A clip parked past the cap makes the render length exceed it; the guard fires before any
+    // OfflineAudioContext / Rust IPC, so this is testable in jsdom.
+    const tooLong = withClip(MAX_EXPORT_MS + 1000);
+    await expect(renderMixedSong(tooLong, [rec("r1")])).rejects.toThrow(ExportTooLongError);
+    await expect(renderMixedSong(tooLong, [rec("r1")])).rejects.toThrow(/limited to 30 minutes/);
   });
 });

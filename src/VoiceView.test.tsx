@@ -42,6 +42,7 @@ describe("VoiceView", () => {
   it("Record button reads 'Record voice' and calls onStart; not recording shows no timer", () => {
     render(<VoiceView {...p} />);
     const btn = screen.getByRole("button", { name: /record voice/i });
+    expect(btn.getAttribute("aria-pressed")).toBe("false"); // recording state exposed (DEBT-034)
     fireEvent.click(btn);
     expect(p.onStart).toHaveBeenCalledOnce();
     expect(screen.queryByRole("timer")).toBeNull();
@@ -50,7 +51,9 @@ describe("VoiceView", () => {
   it("while recording, the button stops and a timer is shown", () => {
     render(<VoiceView {...p} isRecording={true} elapsedMs={2000} />);
     expect(screen.getByRole("timer")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /stop recording/i }));
+    const btn = screen.getByRole("button", { name: /stop recording/i });
+    expect(btn.getAttribute("aria-pressed")).toBe("true"); // recording state exposed (DEBT-034)
+    fireEvent.click(btn);
     expect(p.onStop).toHaveBeenCalledOnce();
   });
 

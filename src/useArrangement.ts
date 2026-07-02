@@ -294,11 +294,19 @@ export function useArrangement() {
       setPlayOriginMs(origin);
       setPlayLoopLenMs(loopLen);
 
-      const fireVoice = (vp: { blobKey: string; effect: VoiceEffect }, at: number) => {
+      // maxDurMs (loop only): cut the audio at the cycle boundary, mirroring the symbolic
+      // force-close — otherwise a clip longer than the remaining window bleeds into (and stacks
+      // across) the next cycle (DEBT-034). The stop timer arms once the buffer actually starts,
+      // so a slow decode shifts the whole play, never lengthens it.
+      const fireVoice = (vp: { blobKey: string; effect: VoiceEffect }, at: number, maxDurMs = Infinity) => {
         const timer = setTimeout(() => {
           void loadVoiceBuffer(vp.blobKey).then((buf) => {
             if (!buf || playGenRef.current !== gen) return; // stopped / superseded before the decode landed
-            voiceHandlesRef.current.push(playVoice(buf, vp.effect));
+            const handle = playVoice(buf, vp.effect);
+            voiceHandlesRef.current.push(handle);
+            if (Number.isFinite(maxDurMs)) {
+              voiceTimersRef.current.push(setTimeout(() => handle.stop(), maxDurMs));
+            }
           });
         }, at);
         voiceTimersRef.current.push(timer);
@@ -306,20 +314,24 @@ export function useArrangement() {
 
       let endMs = stream.length > 0 ? stream[stream.length - 1].t : 0;
       for (const vp of voiceClipPlays(arrangement, recordings)) {
+        // Audible length under the clip's effect (chipmunk shortens, monster lengthens) — the
+        // SAME number the timeline geometry uses (playedMsFor), so what you see is what plays.
+        const effDur = vp.soundMs;
         for (let k = 0; k < vp.loopCount; k++) {
-          const playStart = vp.startMs + k * vp.durationMs;
+          const playStart = vp.startMs + k * effDur;
           if (useLoop) {
             if (playStart >= loopRegion!.startMs && playStart < loopRegion!.endMs) {
               const rel = playStart - loopRegion!.startMs;
               for (let c = 0; c < cycles; c++) {
                 const at = rel + c * loopLen;
-                endMs = Math.max(endMs, at + vp.durationMs);
-                fireVoice(vp, at);
+                const remaining = (c + 1) * loopLen - at; // ms left in this cycle
+                endMs = Math.max(endMs, at + Math.min(effDur, remaining));
+                fireVoice(vp, at, effDur > remaining ? remaining : Infinity);
               }
             }
           } else if (playStart >= origin) {
             const at = playStart - origin;
-            endMs = Math.max(endMs, at + vp.durationMs);
+            endMs = Math.max(endMs, at + effDur);
             fireVoice(vp, at);
           }
         }

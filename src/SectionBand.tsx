@@ -6,7 +6,7 @@
  * Sections are a VISUAL guide only; they never affect playback (flattenArrangement ignores them).
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Section } from "./arrangement";
 import { SECTION_TEMPLATES } from "./arrangementStore";
 import { msToPx, pxToMs, snapMs, PX_PER_MS, LANE_ORIGIN_PX } from "./timeScale";
@@ -34,6 +34,12 @@ type Props = {
 function SectionBlock({ section, ops }: { section: Section; ops: SectionOps }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(section.name);
+  // Focus returns to the block after a KEYBOARD-ended rename (Enter/Escape) so the keyboard
+  // move/resize path isn't stranded on <body>; a mouse blur (clicking elsewhere) must NOT
+  // steal focus back. finishedRef guards reentrancy: Enter commits, then refocusing the block
+  // blurs the still-mounted input, and without the guard that blur would commit AGAIN.
+  const blockRef = useRef<HTMLDivElement>(null);
+  const finishedRef = useRef(false);
 
   const left = msToPx(section.startMs, PX_PER_MS);
   const width = Math.max(10, msToPx(section.endMs - section.startMs, PX_PER_MS));
@@ -57,18 +63,41 @@ function SectionBlock({ section, ops }: { section: Section; ops: SectionOps }) {
     window.addEventListener("pointerup", onUp);
   };
 
-  const commit = () => {
+  /** End the rename exactly once. commit=false reverts; restoreFocus only for keyboard exits. */
+  const finish = (commit: boolean, restoreFocus: boolean) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     setEditing(false);
-    if (draft.trim() && draft.trim() !== section.name) ops.onRenameSection(section.id, draft.trim());
+    if (commit && draft.trim() && draft.trim() !== section.name) ops.onRenameSection(section.id, draft.trim());
     else setDraft(section.name);
+    if (restoreFocus) blockRef.current?.focus();
+  };
+
+  // Keyboard path for move/resize (DEBT-034 — drag had no non-pointer fallback): arrows nudge
+  // the whole section, Shift+arrows resize the end. Keys from the inner rename input / buttons
+  // are ignored (target !== currentTarget) so typing a name never moves the section.
+  const KB_STEP_MS = 500;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // don't hijack modified chords (Cmd+Arrow etc.)
+    const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (dir === 0) return;
+    e.preventDefault();
+    if (e.shiftKey) ops.onResizeSection(section.id, section.endMs + dir * KB_STEP_MS); // store clamps
+    else ops.onMoveSection(section.id, Math.max(0, section.startMs + dir * KB_STEP_MS));
   };
 
   return (
     <div
+      ref={blockRef}
       className="section-block"
       style={{ left, width, background: section.color }}
       onPointerDown={beginDrag("move")}
-      title={`${section.name} — drag to move, drag the right edge to resize`}
+      tabIndex={0}
+      role="group"
+      aria-label={`${section.name} section, ${(section.startMs / 1000).toFixed(1)} to ${(section.endMs / 1000).toFixed(1)} seconds. Arrow keys move; Shift plus arrows resize.`}
+      onKeyDown={handleKeyDown}
+      title={`${section.name} — drag to move, drag the right edge to resize · arrows/Shift+arrows when focused`}
     >
       {editing ? (
         <input
@@ -78,13 +107,10 @@ function SectionBlock({ section, ops }: { section: Section; ops: SectionOps }) {
           aria-label={`Rename ${section.name}`}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
+          onBlur={() => finish(true, false)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            else if (e.key === "Escape") {
-              setDraft(section.name);
-              setEditing(false);
-            }
+            if (e.key === "Enter") finish(true, true);
+            else if (e.key === "Escape") finish(false, true);
           }}
         />
       ) : (
@@ -94,6 +120,7 @@ function SectionBlock({ section, ops }: { section: Section; ops: SectionOps }) {
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
             setDraft(section.name);
+            finishedRef.current = false; // a fresh edit can finish again
             setEditing(true);
           }}
         >

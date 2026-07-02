@@ -88,60 +88,91 @@ export async function recordVideo(opts: {
   };
   drawFrame(0);
 
-  const videoStream = canvas.captureStream(fps);
-  const tracks: MediaStreamTrack[] = [...videoStream.getVideoTracks()];
-
+  // The WHOLE capture graph is acquired and used inside try/finally: closing the AudioContext
+  // alone does NOT release the canvas-capture video track (or the destination's audio track),
+  // and a constructor throwing part-way (e.g. MediaRecorder rejecting the mime) must not leak
+  // the tracks already created — one leak per export otherwise (DEBT-034).
+  const tracks: MediaStreamTrack[] = [];
   let audioCtx: AudioContext | null = null;
   let source: AudioBufferSourceNode | null = null;
-  if (audioBuffer) {
-    audioCtx = new AudioContext();
-    source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    const dest = audioCtx.createMediaStreamDestination();
-    source.connect(dest);
-    source.connect(audioCtx.destination); // also play it aloud so the export gives feedback
-    tracks.push(...dest.stream.getAudioTracks());
-  }
+  let recorder: MediaRecorder | null = null;
+  try {
+    tracks.push(...canvas.captureStream(fps).getVideoTracks());
+    if (audioBuffer) {
+      audioCtx = new AudioContext();
+      source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      const dest = audioCtx.createMediaStreamDestination();
+      source.connect(dest);
+      source.connect(audioCtx.destination); // also play it aloud so the export gives feedback
+      tracks.push(...dest.stream.getAudioTracks());
+    }
 
-  const stream = new MediaStream(tracks);
-  const recorder = new MediaRecorder(stream, { mimeType: picked.mime });
-  const chunks: BlobPart[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
-  };
-  const finished = new Promise<Blob>((resolve) => {
-    recorder.onstop = () => resolve(new Blob(chunks, { type: picked.mime }));
-  });
-
-  recorder.start();
-  const start = performance.now();
-  source?.start();
-
-  await new Promise<void>((resolve) => {
-    const tick = () => {
-      const elapsed = performance.now() - start;
-      drawFrame(elapsed);
-      onProgress?.(Math.min(1, elapsed / durationMs));
-      if (elapsed >= durationMs) {
-        resolve();
-        return;
-      }
-      requestAnimationFrame(tick);
+    const stream = new MediaStream(tracks);
+    const rec = new MediaRecorder(stream, { mimeType: picked.mime });
+    recorder = rec;
+    const chunks: BlobPart[] = [];
+    rec.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
     };
-    requestAnimationFrame(tick);
-  });
+    // Resolves on stop; REJECTS on a mid-recording encoder/muxer error (otherwise a partial
+    // blob would be written and reported as a successful export — DEBT-034 r3).
+    const finished = new Promise<Blob>((resolve, reject) => {
+      rec.onstop = () => resolve(new Blob(chunks, { type: picked.mime }));
+      rec.onerror = () => reject(new Error("Video recording failed part-way through."));
+    });
 
-  try {
-    source?.stop();
-  } catch {
-    /* already stopped */
+    rec.start();
+    const start = performance.now();
+    source?.start();
+
+    await new Promise<void>((resolve) => {
+      const tick = () => {
+        const elapsed = performance.now() - start;
+        drawFrame(elapsed);
+        onProgress?.(Math.min(1, elapsed / durationMs));
+        if (elapsed >= durationMs) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    try {
+      source?.stop();
+    } catch {
+      /* already stopped */
+    }
+    rec.stop();
+    const blob = await finished;
+    return { blob, ext: picked.ext };
+  } finally {
+    // Tear down the whole capture graph — also on the error paths.
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    for (const t of tracks) {
+      try {
+        t.stop();
+      } catch {
+        /* already ended */
+      }
+    }
+    try {
+      source?.disconnect();
+    } catch {
+      /* never connected */
+    }
+    try {
+      await audioCtx?.close();
+    } catch {
+      /* already closed */
+    }
   }
-  recorder.stop();
-  const blob = await finished;
-  try {
-    await audioCtx?.close();
-  } catch {
-    /* ignore */
-  }
-  return { blob, ext: picked.ext };
 }

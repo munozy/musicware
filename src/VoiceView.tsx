@@ -43,6 +43,7 @@ export default function VoiceView({
           className={`voice-record-btn${isRecording ? " recording" : ""}`}
           onClick={isRecording ? onStop : onStart}
           aria-label={isRecording ? "Stop recording" : "Record voice"}
+          aria-pressed={isRecording}
         >
           <span className="voice-record-dot" aria-hidden="true" />
           {isRecording ? "Stop" : "Record voice"}

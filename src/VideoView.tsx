@@ -318,19 +318,24 @@ export default function VideoView({ recordings, onAddRecordings, onGoToSong }: P
           </li>
         ) : (
           images.map((img, i) => (
-            <li
-              key={img.id}
-              className={`video-thumb${selected?.id === img.id ? " selected" : ""}`}
-              onClick={() => setSelectedImageId(img.id)}
-            >
-              {v.imageUrls[img.imageKey] ? (
-                <img className="video-thumb-img" src={v.imageUrls[img.imageKey]} alt={img.name} />
-              ) : (
-                <span className="video-thumb-img video-thumb-loading" aria-hidden="true" />
-              )}
-              <span className="video-thumb-name" title={img.name}>
-                {img.name}
-              </span>
+            <li key={img.id} className={`video-thumb${selected?.id === img.id ? " selected" : ""}`}>
+              {/* A real button (not a clickable <li>) so frame-select is keyboard-reachable and
+                  announces its state — DEBT-034. The duration/reorder controls stay siblings. */}
+              <button
+                className="video-thumb-select"
+                aria-label={`Show ${img.name} in the preview`}
+                aria-pressed={selected?.id === img.id}
+                onClick={() => setSelectedImageId(img.id)}
+              >
+                {v.imageUrls[img.imageKey] ? (
+                  <img className="video-thumb-img" src={v.imageUrls[img.imageKey]} alt="" />
+                ) : (
+                  <span className="video-thumb-img video-thumb-loading" aria-hidden="true" />
+                )}
+                <span className="video-thumb-name" title={img.name}>
+                  {img.name}
+                </span>
+              </button>
               <span className="video-thumb-row">
                 <input
                   className="video-dur-input"
@@ -370,6 +375,8 @@ export default function VideoView({ recordings, onAddRecordings, onGoToSong }: P
                 <button
                   className="clip-stepper-btn video-thumb-del"
                   aria-label={`Remove ${img.name}`}
+                  disabled={busy}
+                  title={busy ? "Wait for the export/save to finish" : "Remove image"}
                   onClick={(e) => {
                     e.stopPropagation();
                     v.removeImage(img.id);

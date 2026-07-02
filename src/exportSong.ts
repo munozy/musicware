@@ -21,12 +21,33 @@ const TAIL_MS = 1500; // let synth release tails ring out past the last note
 const SAMPLE_RATE = 44_100;
 const MP3_KBPS = 192;
 
-/** Musical length of the song (ms): the later of the last symbolic event and any voice clip end. */
+/**
+ * Hard ceiling on the offline render length (DEBT-034). OfflineAudioContext eagerly allocates
+ * the full stereo buffer (~21 MB/min at 44.1 kHz) and the Rust render allocates its own PCM,
+ * so an unbounded song length becomes an opaque allocation failure. 30 min is far beyond any
+ * V1 song and keeps the worst case ~640 MB.
+ */
+export const MAX_EXPORT_MS = 30 * 60_000;
+
+/** Thrown when the song exceeds MAX_EXPORT_MS — the caller shows its message to the user. */
+export class ExportTooLongError extends Error {
+  constructor(totalMs: number) {
+    super(
+      `This song is ${Math.ceil(totalMs / 60_000)} minutes long — export is limited to ${MAX_EXPORT_MS / 60_000} minutes. Trim the arrangement and try again.`,
+    );
+    this.name = "ExportTooLongError";
+  }
+}
+
+/**
+ * Musical length of the song (ms): the later of the last symbolic event and any voice clip end.
+ * Voice lengths use the AUDIBLE (rate-shifted) duration so the export matches live playback.
+ */
 export function songDurationMs(arr: Arrangement, recordings: Recording[]): number {
   const events = flattenArrangement(arr, recordings);
   let end = events.length > 0 ? events[events.length - 1].t : 0;
   for (const vp of voiceClipPlays(arr, recordings)) {
-    end = Math.max(end, vp.startMs + vp.loopCount * vp.durationMs);
+    end = Math.max(end, vp.startMs + vp.loopCount * vp.soundMs);
   }
   return end;
 }
@@ -44,7 +65,10 @@ export async function renderMixedSong(
 ): Promise<AudioBuffer> {
   const events = flattenArrangement(arr, recordings);
   const voices = voiceClipPlays(arr, recordings);
-  const totalMs = songDurationMs(arr, recordings) + TAIL_MS;
+  const songMs = songDurationMs(arr, recordings);
+  const totalMs = songMs + TAIL_MS;
+  // Guard BEFORE any big allocation; the message reports the SONG's length (not song + tail).
+  if (totalMs > MAX_EXPORT_MS) throw new ExportTooLongError(songMs);
   const totalSamples = Math.max(1, Math.ceil((totalMs / 1000) * sampleRate));
 
   // 1) synth PCM from Rust (exact engine sound), returned as f32 LE bytes → Float32Array.
@@ -69,8 +93,9 @@ export async function renderMixedSong(
   for (const vp of voices) {
     const buf = await loadVoiceBuffer(vp.blobKey);
     if (!buf) continue;
+    // Loop repeats abut at the audible (rate-shifted) length — same maths as live playback.
     for (let k = 0; k < vp.loopCount; k++) {
-      renderVoiceInto(ctx, buf, vp.effect, (vp.startMs + k * vp.durationMs) / 1000);
+      renderVoiceInto(ctx, buf, vp.effect, (vp.startMs + k * vp.soundMs) / 1000);
     }
   }
   return ctx.startRendering();

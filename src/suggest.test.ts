@@ -42,4 +42,21 @@ describe("suggestForSection", () => {
     expect(out[0].loopCount).toBe(1);
     expect(typeof out[0].reason).toBe("string");
   });
+
+  it("voice takes fill by their AUDIBLE (rate-shifted) length (DEBT-034 r3)", () => {
+    // 1000ms chipmunk take sounds 625ms → a 2500ms section needs 4 loops (4×625 = exact fill).
+    const chip: Recording = {
+      id: "chip",
+      name: "chip",
+      createdAt: 0,
+      durationMs: 1000,
+      kind: "voice",
+      events: [],
+      audio: { blobKey: "k", mimeType: "audio/webm", effect: "chipmunk" },
+    };
+    const out = suggestForSection(2500, [chip]);
+    expect(out[0].loopCount).toBe(4);
+    expect(out[0].fillMs).toBeCloseTo(2500);
+    expect(out[0].score).toBeCloseTo(1);
+  });
 });

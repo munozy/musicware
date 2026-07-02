@@ -6,6 +6,7 @@ import {
   pendingNotesAfter,
   clipWindow,
   clipPlayedMs,
+  playedMsFor,
   voiceClipPlays,
   type Arrangement,
   type Track,
@@ -502,7 +503,8 @@ describe("voiceClipPlays — the audio (voice) playback pass (ADR-0009)", () => 
       [voiceRec("v1", 1500, "robot")],
     );
     expect(plays).toEqual([
-      { recordingId: "v1", blobKey: "blob-v1", effect: "robot", startMs: 2000, loopCount: 2, durationMs: 1500 },
+      // soundMs == durationMs for robot (not a rate-shifting effect)
+      { recordingId: "v1", blobKey: "blob-v1", effect: "robot", startMs: 2000, loopCount: 2, durationMs: 1500, soundMs: 1500 },
     ]);
   });
 
@@ -555,6 +557,44 @@ describe("voiceClipPlays — the audio (voice) playback pass (ADR-0009)", () => 
       track({ id: "t3", clips: [clip({ recordingId: "c" })] }),
     ]);
     expect(voiceClipPlays(soloed, recs).map((p) => p.recordingId)).toEqual(["b"]); // only soloed plays
+  });
+
+  it("soundMs is the rate-shifted audible length (chipmunk shorter, monster longer)", () => {
+    const recs = [voiceRec("chip", 1000, "chipmunk"), voiceRec("mon", 1000, "monster"), voiceRec("dry", 1000)];
+    const a = arr([
+      track({
+        id: "t1",
+        clips: [clip({ recordingId: "chip" }), clip({ recordingId: "mon", startMs: 1 }), clip({ recordingId: "dry", startMs: 2 })],
+      }),
+    ]);
+    const byId = Object.fromEntries(voiceClipPlays(a, recs).map((p) => [p.recordingId, p]));
+    expect(byId.chip.soundMs).toBeCloseTo(625); // 1000 / 1.6
+    expect(byId.mon.soundMs).toBeCloseTo(1000 / 0.65);
+    expect(byId.dry.soundMs).toBe(1000);
+    expect(byId.chip.durationMs).toBe(1000); // recorded length still reported
+  });
+});
+
+describe("playedMsFor — the ONE screen/scheduler length (DEBT-034 r3)", () => {
+  it("voice clips: loops × the rate-shifted length (per-clip effect override wins)", () => {
+    const rec: Recording = {
+      id: "v",
+      name: "v",
+      createdAt: 0,
+      durationMs: 1000,
+      kind: "voice",
+      events: [],
+      audio: { blobKey: "k", mimeType: "audio/webm", effect: "none" },
+    };
+    expect(playedMsFor(clip({ recordingId: "v", loopCount: 2 }), rec)).toBe(2000);
+    expect(playedMsFor(clip({ recordingId: "v", loopCount: 2, effect: "chipmunk" }), rec)).toBeCloseTo(1250);
+    const chipTake: Recording = { ...rec, audio: { ...rec.audio!, effect: "chipmunk" } };
+    expect(playedMsFor(clip({ recordingId: "v" }), chipTake)).toBeCloseTo(625); // take's own effect
+  });
+
+  it("keyboard clips: unchanged trimmed-window × loops maths", () => {
+    const rec = cleanNote("k");
+    expect(playedMsFor(clip({ recordingId: "k", loopCount: 3 }), rec)).toBe(clipPlayedMs({ loopCount: 3 }, 1000));
   });
 });
 
